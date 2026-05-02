@@ -108,6 +108,13 @@ struct BackgroundWorkerHandle
 static BackgroundWorkerArray *BackgroundWorkerData;
 
 /*
+ * pg_cron BGW entry points (declared here instead of including
+ * commands/cron.h to avoid struct BackgroundWorkerHandle conflict).
+ */
+extern void PgCronLauncherMain(Datum arg);
+extern void CronBackgroundWorker(Datum arg);
+
+/*
  * List of internal background worker entry points.  We need this for
  * reasons explained in LookupBackgroundWorkerFunction(), below.
  */
@@ -132,6 +139,12 @@ static const struct
 	},
 	{
 		"TablesyncWorkerMain", TablesyncWorkerMain
+	},
+	{
+		"PgCronLauncherMain", PgCronLauncherMain
+	},
+	{
+		"CronBackgroundWorker", CronBackgroundWorker
 	}
 };
 

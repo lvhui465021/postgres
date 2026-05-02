@@ -38,6 +38,7 @@ backend_sources += files(
 
 
 install_data(
+  'cron.sql',
   'information_schema.sql',
   'sql_features.txt',
   'system_functions.sql',

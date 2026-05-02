@@ -20,6 +20,11 @@ OBJS = \
 	async.o \
 	cluster.o \
 	collationcmds.o \
+	cron.o \
+	cron_entry.o \
+	cron_job_metadata.o \
+	cron_misc.o \
+	cron_task_states.o \
 	comment.o \
 	constraint.o \
 	conversioncmds.o \
@@ -65,5 +70,8 @@ OBJS = \
 	vacuumparallel.o \
 	variable.o \
 	view.o
+
+# cron.c tolerates intentional fallthrough in the task state machine.
+cron.o: CFLAGS += -Wno-implicit-fallthrough
 
 include $(top_srcdir)/src/backend/common.mk

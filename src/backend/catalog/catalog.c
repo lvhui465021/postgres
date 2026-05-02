@@ -29,6 +29,7 @@
 #include "catalog/pg_auth_members.h"
 #include "catalog/pg_authid.h"
 #include "catalog/pg_database.h"
+#include "catalog/pg_cron_job.h"
 #include "catalog/pg_db_role_setting.h"
 #include "catalog/pg_largeobject.h"
 #include "catalog/pg_namespace.h"
@@ -314,7 +315,10 @@ IsSharedRelation(Oid relationId)
 		relationId == SharedDescriptionRelationId ||
 		relationId == SharedSecLabelRelationId ||
 		relationId == SubscriptionRelationId ||
-		relationId == TableSpaceRelationId)
+		relationId == TableSpaceRelationId ||
+		relationId == CronJobRelationId ||
+		relationId == CronJobPkeyIndexId ||
+		relationId == CronJobNameUsernameIndexId)
 		return true;
 	/* These are their indexes */
 	if (relationId == AuthIdOidIndexId ||

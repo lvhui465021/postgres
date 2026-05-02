@@ -81,7 +81,8 @@ CATALOG_HEADERS := \
 	pg_publication_namespace.h \
 	pg_publication_rel.h \
 	pg_subscription.h \
-	pg_subscription_rel.h
+	pg_subscription_rel.h \
+	pg_cron_job.h
 
 GENERATED_HEADERS := $(CATALOG_HEADERS:%.h=%_d.h)
 
@@ -98,6 +99,7 @@ POSTGRES_BKI_DATA = \
 	pg_class.dat \
 	pg_collation.dat \
 	pg_conversion.dat \
+	pg_cron_job.dat \
 	pg_database.dat \
 	pg_language.dat \
 	pg_namespace.dat \

@@ -69,6 +69,7 @@ catalog_headers = [
   'pg_publication_rel.h',
   'pg_subscription.h',
   'pg_subscription_rel.h',
+  'pg_cron_job.h',
 ]
 
 # The .dat files we need can just be listed alphabetically.
@@ -82,6 +83,7 @@ bki_data = [
   'pg_class.dat',
   'pg_collation.dat',
   'pg_conversion.dat',
+  'pg_cron_job.dat',
   'pg_database.dat',
   'pg_language.dat',
   'pg_namespace.dat',

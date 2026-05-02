@@ -64,10 +64,16 @@ ORDER BY 1, 2;
  pg_class                | relacl        | aclitem[]
  pg_class                | reloptions    | text[]
  pg_class                | relpartbound  | pg_node_tree
+ pg_cron_job             | command       | text
+ pg_cron_job             | database      | text
+ pg_cron_job             | jobname       | text
+ pg_cron_job             | nodename      | text
+ pg_cron_job             | schedule      | text
+ pg_cron_job             | username      | text
  pg_largeobject          | data          | bytea
  pg_largeobject_metadata | lomacl        | aclitem[]
  pg_replication_origin   | roname        | text
-(11 rows)
+(17 rows)
 
 -- system catalogs without primary keys
 --

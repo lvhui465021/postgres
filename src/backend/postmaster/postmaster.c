@@ -128,6 +128,9 @@
 #include "storage/pg_shmem.h"
 #endif
 
+/* pg_cron init functions (declared here to avoid commands/cron.h dependency) */
+extern void cron_init_gucs(void);
+extern void cron_init(void);
 
 /*
  * CountChildren and SignalChildren take a bitmask argument to represent
@@ -925,6 +928,15 @@ PostmasterMain(int argc, char *argv[])
 	 * before any modules had a chance to take the background worker slots.
 	 */
 	ApplyLauncherRegister();
+
+	/*
+	 * Register pg_cron GUCs and launcher before shared_preload_libraries
+	 * so that the background worker slot is reserved.
+	 */
+	process_shared_preload_libraries_in_progress = true;
+	cron_init_gucs();
+	cron_init();
+	process_shared_preload_libraries_in_progress = false;
 
 	/*
 	 * process any libraries that should be preloaded at postmaster start
