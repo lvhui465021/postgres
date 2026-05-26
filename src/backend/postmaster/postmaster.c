@@ -92,6 +92,7 @@
 #include "access/xlog.h"
 #include "access/xlog_internal.h"
 #include "access/xlogrecovery.h"
+#include "columnar/columnar.h"
 #include "common/file_perm.h"
 #include "common/pg_prng.h"
 #include "lib/ilist.h"
@@ -587,6 +588,7 @@ PostmasterMain(int argc, char *argv[])
 	 * Options setup
 	 */
 	InitializeGUCOptions();
+	columnar_init();
 
 	opterr = 1;
 

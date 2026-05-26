@@ -1,0 +1,236 @@
+-- Access method conversion coverage for built-in columnar tables.
+CREATE SCHEMA columnar_alter_table_set_access_method;
+SET search_path TO columnar_alter_table_set_access_method, public;
+SET columnar.compression TO 'none';
+CREATE TABLE heap_to_columnar(a int) USING heap;
+INSERT INTO heap_to_columnar VALUES (1), (2), (3);
+SELECT relam = (SELECT oid FROM pg_am WHERE amname = 'heap') AS starts_as_heap
+FROM pg_class
+WHERE oid = 'heap_to_columnar'::regclass;
+ starts_as_heap 
+----------------
+ t
+(1 row)
+
+SELECT columnar.alter_table_set_access_method(
+    'columnar_alter_table_set_access_method.heap_to_columnar', 'columnar');
+ alter_table_set_access_method 
+-------------------------------
+ t
+(1 row)
+
+SELECT relam = (SELECT oid FROM pg_am WHERE amname = 'columnar') AS converted_to_columnar
+FROM pg_class
+WHERE oid = 'heap_to_columnar'::regclass;
+ converted_to_columnar 
+-----------------------
+ t
+(1 row)
+
+SELECT count(*), sum(a) FROM heap_to_columnar;
+ count | sum 
+-------+-----
+     3 |   6
+(1 row)
+
+SELECT columnar.alter_table_set_access_method(
+    'columnar_alter_table_set_access_method.heap_to_columnar', 'heap');
+ alter_table_set_access_method 
+-------------------------------
+ t
+(1 row)
+
+SELECT relam = (SELECT oid FROM pg_am WHERE amname = 'heap') AS converted_back_to_heap
+FROM pg_class
+WHERE oid = 'heap_to_columnar'::regclass;
+ converted_back_to_heap 
+------------------------
+ t
+(1 row)
+
+SELECT count(*), sum(a) FROM heap_to_columnar;
+ count | sum 
+-------+-----
+     3 |   6
+(1 row)
+
+CREATE TABLE trigger_convert(a int) USING heap;
+CREATE FUNCTION before_stmt_trigger() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE NOTICE 'before stmt %', TG_OP;
+    RETURN NULL;
+END;
+$$;
+CREATE FUNCTION before_row_trigger() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE NOTICE 'before row % %', TG_OP, NEW.a;
+    RETURN NEW;
+END;
+$$;
+CREATE FUNCTION after_row_trigger() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE NOTICE 'after row % %', TG_OP, NEW.a;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER trigger_convert_before_stmt
+BEFORE INSERT ON trigger_convert
+FOR EACH STATEMENT EXECUTE FUNCTION before_stmt_trigger();
+CREATE TRIGGER trigger_convert_before_row
+BEFORE INSERT ON trigger_convert
+FOR EACH ROW EXECUTE FUNCTION before_row_trigger();
+CREATE TRIGGER trigger_convert_after_row
+AFTER INSERT ON trigger_convert
+FOR EACH ROW EXECUTE FUNCTION after_row_trigger();
+INSERT INTO trigger_convert VALUES (1);
+NOTICE:  before stmt INSERT
+NOTICE:  before row INSERT 1
+NOTICE:  after row INSERT 1
+SELECT count(*) AS trigger_count_before
+FROM pg_trigger
+WHERE tgrelid = 'trigger_convert'::regclass;
+ trigger_count_before 
+----------------------
+                    3
+(1 row)
+
+SELECT columnar.alter_table_set_access_method(
+    'columnar_alter_table_set_access_method.trigger_convert', 'columnar');
+WARNING:  Trigger `CREATE TRIGGER trigger_convert_after_row AFTER INSERT ON columnar_alter_table_set_access_method.trigger_convert FOR EACH ROW EXECUTE FUNCTION after_row_trigger()` cannot be applied.
+WARNING:  Foreign keys and AFTER ROW triggers are not supported for columnar tables. Consider an AFTER STATEMENT trigger instead.
+ alter_table_set_access_method 
+-------------------------------
+ t
+(1 row)
+
+SELECT count(*) AS trigger_count_after
+FROM pg_trigger
+WHERE tgrelid = 'trigger_convert'::regclass;
+ trigger_count_after 
+---------------------
+                   2
+(1 row)
+
+INSERT INTO trigger_convert VALUES (2);
+NOTICE:  before stmt INSERT
+NOTICE:  before row INSERT 2
+SELECT count(*), sum(a) FROM trigger_convert;
+ count | sum 
+-------+-----
+     2 |   3
+(1 row)
+
+CREATE TABLE indexed_convert(a int, b int) USING heap;
+INSERT INTO indexed_convert SELECT i, i * 2 FROM generate_series(1, 100) i;
+CREATE INDEX indexed_convert_a_idx ON indexed_convert(a);
+CREATE INDEX indexed_convert_expr_idx ON indexed_convert((b + 1));
+SELECT indexname FROM pg_indexes
+WHERE schemaname = 'columnar_alter_table_set_access_method'
+AND tablename = 'indexed_convert'
+ORDER BY indexname;
+        indexname         
+--------------------------
+ indexed_convert_a_idx
+ indexed_convert_expr_idx
+(2 rows)
+
+SELECT columnar.alter_table_set_access_method(
+    'columnar_alter_table_set_access_method.indexed_convert', 'columnar');
+ alter_table_set_access_method 
+-------------------------------
+ t
+(1 row)
+
+SELECT relam = (SELECT oid FROM pg_am WHERE amname = 'columnar') AS indexed_converted_to_columnar
+FROM pg_class
+WHERE oid = 'indexed_convert'::regclass;
+ indexed_converted_to_columnar 
+-------------------------------
+ t
+(1 row)
+
+SELECT indexname FROM pg_indexes
+WHERE schemaname = 'columnar_alter_table_set_access_method'
+AND tablename = 'indexed_convert'
+ORDER BY indexname;
+        indexname         
+--------------------------
+ indexed_convert_a_idx
+ indexed_convert_expr_idx
+(2 rows)
+
+SELECT b FROM indexed_convert WHERE a = 42;
+ b  
+----
+ 84
+(1 row)
+
+SELECT columnar.alter_table_set_access_method(
+    'columnar_alter_table_set_access_method.indexed_convert', 'heap');
+ alter_table_set_access_method 
+-------------------------------
+ t
+(1 row)
+
+SELECT relam = (SELECT oid FROM pg_am WHERE amname = 'heap') AS indexed_converted_back_to_heap
+FROM pg_class
+WHERE oid = 'indexed_convert'::regclass;
+ indexed_converted_back_to_heap 
+--------------------------------
+ t
+(1 row)
+
+SELECT b FROM indexed_convert WHERE a = 42;
+ b  
+----
+ 84
+(1 row)
+
+SELECT columnar.alter_table_set_access_method(
+    'columnar_alter_table_set_access_method.missing_table', 'columnar');
+WARNING:  Table columnar_alter_table_set_access_method.missing_table does not exist.
+ alter_table_set_access_method 
+-------------------------------
+ f
+(1 row)
+
+CREATE TABLE invalid_method(a int);
+SELECT columnar.alter_table_set_access_method(
+    'columnar_alter_table_set_access_method.invalid_method', 'other');
+WARNING:  Cannot convert table: Allowed access methods are heap and columnar.
+ alter_table_set_access_method 
+-------------------------------
+ f
+(1 row)
+
+SELECT columnar.alter_table_set_access_method(
+    'columnar_alter_table_set_access_method.invalid_method', 'heap');
+WARNING:  Cannot convert table: conversion to same access method.
+ alter_table_set_access_method 
+-------------------------------
+ f
+(1 row)
+
+CREATE TABLE identity_convert(
+    a int,
+    b int GENERATED BY DEFAULT AS IDENTITY
+);
+SELECT columnar.alter_table_set_access_method(
+    'columnar_alter_table_set_access_method.identity_convert', 'columnar');
+WARNING:  Cannot convert table: table columnar_alter_table_set_access_method.identity_convert must not use GENERATED ... AS IDENTITY.
+ alter_table_set_access_method 
+-------------------------------
+ f
+(1 row)
+
+RESET search_path;
+DROP SCHEMA columnar_alter_table_set_access_method CASCADE;
+NOTICE:  drop cascades to 8 other objects
+DETAIL:  drop cascades to table columnar_alter_table_set_access_method.heap_to_columnar
+drop cascades to function columnar_alter_table_set_access_method.before_stmt_trigger()
+drop cascades to function columnar_alter_table_set_access_method.before_row_trigger()
+drop cascades to function columnar_alter_table_set_access_method.after_row_trigger()
+drop cascades to table columnar_alter_table_set_access_method.trigger_convert
+drop cascades to table columnar_alter_table_set_access_method.indexed_convert
+drop cascades to table columnar_alter_table_set_access_method.invalid_method
+drop cascades to table columnar_alter_table_set_access_method.identity_convert

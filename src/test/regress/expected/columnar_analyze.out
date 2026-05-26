@@ -1,0 +1,67 @@
+-- ANALYZE coverage for built-in columnar tables.
+CREATE SCHEMA columnar_analyze;
+SET search_path TO columnar_analyze, public;
+SET columnar.compression TO 'none';
+CREATE TABLE analyze_uncompressed(
+    a int,
+    b text,
+    c char(3),
+    d float8
+) USING columnar;
+INSERT INTO analyze_uncompressed
+SELECT g, 'value-' || (g % 10), 'abc', g / 10.0
+FROM generate_series(1, 1000) g;
+ANALYZE analyze_uncompressed;
+SELECT count(*) AS stats_count
+FROM pg_stats
+WHERE schemaname = 'columnar_analyze'
+AND tablename = 'analyze_uncompressed';
+ stats_count 
+-------------
+           4
+(1 row)
+
+SET columnar.compression TO 'pglz';
+CREATE TABLE analyze_compressed(
+    a int,
+    b text,
+    c char(3),
+    d float8
+) USING columnar;
+INSERT INTO analyze_compressed
+SELECT g, repeat('compressed-', 2) || (g % 10), 'xyz', g / 10.0
+FROM generate_series(1, 1000) g;
+RESET columnar.compression;
+ANALYZE analyze_compressed;
+SELECT count(*) AS stats_count
+FROM pg_stats
+WHERE schemaname = 'columnar_analyze'
+AND tablename = 'analyze_compressed';
+ stats_count 
+-------------
+           4
+(1 row)
+
+CREATE TABLE analyze_large(a int, b text, c char) USING columnar;
+INSERT INTO analyze_large
+SELECT floor(i / 1000)::int, floor(i / 10)::text, 'a'
+FROM generate_series(1, 100000) i;
+INSERT INTO analyze_large
+SELECT floor(i / 2)::int, floor(i / 10)::text, 'b'
+FROM generate_series(1000, 110000) i;
+ANALYZE analyze_large;
+SELECT count(*) AS stats_count
+FROM pg_stats
+WHERE schemaname = 'columnar_analyze'
+AND tablename = 'analyze_large';
+ stats_count 
+-------------
+           3
+(1 row)
+
+RESET search_path;
+DROP SCHEMA columnar_analyze CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table columnar_analyze.analyze_uncompressed
+drop cascades to table columnar_analyze.analyze_compressed
+drop cascades to table columnar_analyze.analyze_large

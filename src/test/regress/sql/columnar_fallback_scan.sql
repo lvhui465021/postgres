@@ -1,0 +1,38 @@
+-- Fallback scan coverage when columnar custom scan is disabled.
+
+CREATE SCHEMA columnar_fallback_scan;
+SET search_path TO columnar_fallback_scan, public;
+SET columnar.compression TO 'none';
+
+SET columnar.enable_custom_scan TO off;
+
+CREATE TABLE fallback_scan(i int) USING columnar;
+SELECT columnar.alter_columnar_table_set('fallback_scan', compression => 'none');
+
+INSERT INTO fallback_scan
+SELECT generate_series(1, 150000);
+
+VACUUM ANALYZE fallback_scan;
+
+SELECT count(*), min(i), max(i), avg(i)
+FROM fallback_scan;
+
+SET min_parallel_table_scan_size TO 1;
+SET parallel_tuple_cost TO 0;
+SET max_parallel_workers TO 4;
+SET max_parallel_workers_per_gather TO 4;
+
+EXPLAIN (COSTS OFF)
+SELECT count(*), min(i), max(i), avg(i)
+FROM fallback_scan;
+
+SELECT count(*), min(i), max(i), avg(i)
+FROM fallback_scan;
+
+RESET min_parallel_table_scan_size;
+RESET parallel_tuple_cost;
+RESET max_parallel_workers;
+RESET max_parallel_workers_per_gather;
+RESET columnar.enable_custom_scan;
+RESET search_path;
+DROP SCHEMA columnar_fallback_scan CASCADE;

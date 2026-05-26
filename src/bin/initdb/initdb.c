@@ -183,6 +183,8 @@ static char *info_schema_file;
 static char *features_file;
 static char *system_constraints_file;
 static char *system_functions_file;
+static char *columnar_system_file;
+static char *columnar_plpgsql_file;
 static char *system_views_file;
 static bool success = false;
 static bool made_new_pgdata = false;
@@ -2800,6 +2802,8 @@ setup_data_file_paths(void)
 	set_input(&features_file, "sql_features.txt");
 	set_input(&system_constraints_file, "system_constraints.sql");
 	set_input(&system_functions_file, "system_functions.sql");
+	set_input(&columnar_system_file, "columnar_system.sql");
+	set_input(&columnar_plpgsql_file, "columnar_plpgsql.sql");
 	set_input(&system_views_file, "system_views.sql");
 
 	if (show_setting || debug)
@@ -2828,6 +2832,8 @@ setup_data_file_paths(void)
 	check_input(features_file);
 	check_input(system_constraints_file);
 	check_input(system_functions_file);
+	check_input(columnar_system_file);
+	check_input(columnar_plpgsql_file);
 	check_input(system_views_file);
 }
 
@@ -3119,6 +3125,7 @@ initialize_data_directory(void)
 	setup_run_file(cmdfd, system_constraints_file);
 
 	setup_run_file(cmdfd, system_functions_file);
+	setup_run_file(cmdfd, columnar_system_file);
 
 	setup_depend(cmdfd);
 
@@ -3140,6 +3147,7 @@ initialize_data_directory(void)
 	setup_schema(cmdfd);
 
 	load_plpgsql(cmdfd);
+	setup_run_file(cmdfd, columnar_plpgsql_file);
 
 	vacuum_db(cmdfd);
 

@@ -1,0 +1,113 @@
+-- Materialized view coverage for built-in columnar tables.
+CREATE SCHEMA columnar_matview;
+SET search_path TO columnar_matview, public;
+SET columnar.compression TO 'none';
+CREATE TABLE matview_source(a int, b int) USING columnar;
+INSERT INTO matview_source
+SELECT floor(i / 4), 2 * i
+FROM generate_series(1, 10) i;
+CREATE MATERIALIZED VIEW matview_columnar(a, bsum, cnt) USING columnar AS
+SELECT a, sum(b), count(*)
+FROM matview_source
+GROUP BY a;
+SELECT * FROM matview_columnar ORDER BY a;
+ a | bsum | cnt 
+---+------+-----
+ 0 |   12 |   3
+ 1 |   44 |   4
+ 2 |   54 |   3
+(3 rows)
+
+INSERT INTO matview_source
+SELECT floor(i / 4), 2 * i
+FROM generate_series(11, 20) i;
+SELECT * FROM matview_columnar ORDER BY a;
+ a | bsum | cnt 
+---+------+-----
+ 0 |   12 |   3
+ 1 |   44 |   4
+ 2 |   54 |   3
+(3 rows)
+
+SELECT compression, compression_level, stripe_row_limit, chunk_group_row_limit
+FROM columnar.options
+WHERE regclass = 'matview_columnar'::regclass;
+ compression | compression_level | stripe_row_limit | chunk_group_row_limit 
+-------------+-------------------+------------------+-----------------------
+ none        |                 3 |           150000 |                 10000
+(1 row)
+
+SELECT columnar.alter_columnar_table_set('matview_columnar', compression => 'pglz');
+ alter_columnar_table_set 
+--------------------------
+ 
+(1 row)
+
+SELECT compression, compression_level, stripe_row_limit, chunk_group_row_limit
+FROM columnar.options
+WHERE regclass = 'matview_columnar'::regclass;
+ compression | compression_level | stripe_row_limit | chunk_group_row_limit 
+-------------+-------------------+------------------+-----------------------
+ pglz        |                 3 |           150000 |                 10000
+(1 row)
+
+REFRESH MATERIALIZED VIEW matview_columnar;
+SELECT compression, compression_level, stripe_row_limit, chunk_group_row_limit
+FROM columnar.options
+WHERE regclass = 'matview_columnar'::regclass;
+ compression | compression_level | stripe_row_limit | chunk_group_row_limit 
+-------------+-------------------+------------------+-----------------------
+ pglz        |                 3 |           150000 |                 10000
+(1 row)
+
+SELECT * FROM matview_columnar ORDER BY a;
+ a | bsum | cnt 
+---+------+-----
+ 0 |   12 |   3
+ 1 |   44 |   4
+ 2 |   76 |   4
+ 3 |  108 |   4
+ 4 |  140 |   4
+ 5 |   40 |   1
+(6 rows)
+
+SELECT storage_id AS matview_storage_id
+FROM columnar.stripe
+ORDER BY storage_id DESC
+LIMIT 1 \gset
+SELECT count(*) AS stripe_count
+FROM columnar.stripe
+WHERE storage_id = :matview_storage_id;
+ stripe_count 
+--------------
+            1
+(1 row)
+
+SELECT count(*) > 0 AS has_chunk_metadata
+FROM columnar.chunk
+WHERE storage_id = :matview_storage_id;
+ has_chunk_metadata 
+--------------------
+ t
+(1 row)
+
+DROP TABLE matview_source CASCADE;
+NOTICE:  drop cascades to materialized view matview_columnar
+SELECT count(*) AS stripes_after_drop
+FROM columnar.stripe
+WHERE storage_id = :matview_storage_id;
+ stripes_after_drop 
+--------------------
+                  0
+(1 row)
+
+SELECT count(*) AS chunks_after_drop
+FROM columnar.chunk
+WHERE storage_id = :matview_storage_id;
+ chunks_after_drop 
+-------------------
+                 0
+(1 row)
+
+RESET search_path;
+DROP SCHEMA columnar_matview;

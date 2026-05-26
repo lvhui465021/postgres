@@ -1,0 +1,106 @@
+-- Empty table coverage for built-in columnar tables.
+CREATE SCHEMA columnar_empty;
+SET search_path TO columnar_empty, public;
+SET columnar.compression TO 'none';
+CREATE TABLE empty_uncompressed(a int) USING columnar;
+CREATE TABLE empty_compressed(a int) USING columnar;
+SELECT columnar.alter_columnar_table_set('empty_compressed', compression => 'pglz');
+ alter_columnar_table_set 
+--------------------------
+ 
+(1 row)
+
+SELECT columnar.alter_columnar_table_set('empty_compressed', stripe_row_limit => 2000);
+ alter_columnar_table_set 
+--------------------------
+ 
+(1 row)
+
+SELECT columnar.alter_columnar_table_set('empty_compressed', chunk_group_row_limit => 1000);
+ alter_columnar_table_set 
+--------------------------
+ 
+(1 row)
+
+SELECT compression, stripe_row_limit, chunk_group_row_limit
+FROM columnar.options
+WHERE regclass = 'empty_compressed'::regclass;
+ compression | stripe_row_limit | chunk_group_row_limit 
+-------------+------------------+-----------------------
+ pglz        |             2000 |                  1000
+(1 row)
+
+SELECT * FROM empty_uncompressed;
+ a 
+---
+(0 rows)
+
+SELECT count(*) FROM empty_uncompressed;
+ count 
+-------
+     0
+(1 row)
+
+SELECT * FROM empty_compressed;
+ a 
+---
+(0 rows)
+
+SELECT count(*) FROM empty_compressed;
+ count 
+-------
+     0
+(1 row)
+
+EXPLAIN (COSTS OFF, SUMMARY OFF, TIMING OFF)
+SELECT * FROM empty_uncompressed;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Custom Scan (ColumnarScan) on empty_uncompressed
+   Columnar Projected Columns: a
+(2 rows)
+
+EXPLAIN (COSTS OFF, SUMMARY OFF, TIMING OFF)
+SELECT * FROM empty_compressed;
+                   QUERY PLAN                   
+------------------------------------------------
+ Custom Scan (ColumnarScan) on empty_compressed
+   Columnar Projected Columns: a
+(2 rows)
+
+VACUUM empty_uncompressed;
+VACUUM empty_compressed;
+VACUUM FULL empty_uncompressed;
+VACUUM FULL empty_compressed;
+ANALYZE empty_uncompressed;
+ANALYZE empty_compressed;
+TRUNCATE empty_uncompressed;
+TRUNCATE empty_compressed;
+ALTER TABLE empty_uncompressed ALTER COLUMN a TYPE text;
+ALTER TABLE empty_compressed ALTER COLUMN a TYPE text;
+EXPLAIN TABLE empty_uncompressed;
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Custom Scan (ColumnarScan) on empty_uncompressed  (cost=0.00..0.00 rows=0 width=32)
+   Columnar Projected Columns: a
+(2 rows)
+
+EXPLAIN TABLE empty_compressed;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Custom Scan (ColumnarScan) on empty_compressed  (cost=0.00..0.00 rows=0 width=32)
+   Columnar Projected Columns: a
+(2 rows)
+
+DROP TABLE empty_uncompressed;
+DROP TABLE empty_compressed;
+SELECT count(*) AS orphaned_options
+FROM columnar.options o
+WHERE o.regclass NOT IN (SELECT oid FROM pg_class);
+ orphaned_options 
+------------------
+                0
+(1 row)
+
+RESET search_path;
+DROP SCHEMA columnar_empty;

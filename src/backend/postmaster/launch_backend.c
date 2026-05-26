@@ -33,6 +33,7 @@
 
 #include <unistd.h>
 
+#include "columnar/columnar.h"
 #include "libpq/libpq-be.h"
 #include "miscadmin.h"
 #include "postmaster/autovacuum.h"
@@ -616,6 +617,7 @@ SubPostmasterMain(int argc, char *argv[])
 
 	/* Setup essential subsystems (to ensure elog() behaves sanely) */
 	InitializeGUCOptions();
+	columnar_init();
 
 	/* Check we got appropriate args */
 	if (argc != 3)

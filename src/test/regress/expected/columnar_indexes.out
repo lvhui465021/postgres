@@ -1,0 +1,128 @@
+-- Index coverage for built-in columnar tables.
+CREATE SCHEMA columnar_indexes;
+SET search_path TO columnar_indexes, public;
+SET columnar.compression TO 'none';
+SET columnar.enable_custom_scan TO 'off';
+SET enable_seqscan TO 'off';
+SET seq_page_cost TO 10000000;
+CREATE TABLE indexed_table (
+    a int,
+    b int,
+    c text
+) USING columnar;
+INSERT INTO indexed_table
+SELECT i, i * 2, 'value-' || i
+FROM generate_series(1, 5000) i;
+CREATE INDEX indexed_table_a_idx ON indexed_table(a);
+EXPLAIN (COSTS OFF)
+SELECT b FROM indexed_table WHERE a = 3210;
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Index Scan using indexed_table_a_idx on indexed_table
+   Index Cond: (a = 3210)
+(2 rows)
+
+SELECT b, c FROM indexed_table WHERE a = 3210;
+  b   |     c      
+------+------------
+ 6420 | value-3210
+(1 row)
+
+CREATE INDEX indexed_table_b_partial_idx ON indexed_table(b)
+WHERE b > 6000 AND b < 7000;
+EXPLAIN (COSTS OFF)
+SELECT b FROM indexed_table WHERE b = 6400;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Index Scan using indexed_table_b_partial_idx on indexed_table
+   Index Cond: (b = 6400)
+(2 rows)
+
+EXPLAIN (COSTS OFF)
+SELECT b FROM indexed_table WHERE b = 5000;
+        QUERY PLAN         
+---------------------------
+ Seq Scan on indexed_table
+   Disabled: true
+   Filter: (b = 5000)
+(3 rows)
+
+CREATE INDEX indexed_table_b_hash_idx ON indexed_table USING hash(b);
+SELECT sum(a) = 3500 AS hash_index_result
+FROM indexed_table
+WHERE b = 7000;
+ hash_index_result 
+-------------------
+ t
+(1 row)
+
+REINDEX TABLE indexed_table;
+SELECT sum(a) = 3500 AS hash_index_result_after_reindex
+FROM indexed_table
+WHERE b = 7000;
+ hash_index_result_after_reindex 
+---------------------------------
+ t
+(1 row)
+
+VACUUM FULL indexed_table;
+SELECT sum(a) = 3500 AS hash_index_result_after_vacuum
+FROM indexed_table
+WHERE b = 7000;
+ hash_index_result_after_vacuum 
+--------------------------------
+ t
+(1 row)
+
+CREATE UNIQUE INDEX indexed_table_a_unique_idx ON indexed_table(a);
+INSERT INTO indexed_table VALUES (42, 8400, 'duplicate');
+ERROR:  duplicate key value violates unique constraint "indexed_table_a_unique_idx"
+DETAIL:  Key (a)=(42) already exists.
+INSERT INTO indexed_table VALUES (6001, 12002, 'new-value');
+CREATE TABLE partial_unique_test (
+    a int,
+    b int
+) USING columnar;
+CREATE UNIQUE INDEX partial_unique_test_a_idx ON partial_unique_test(a)
+WHERE b > 500;
+INSERT INTO partial_unique_test VALUES (1, 2), (1, 2);
+INSERT INTO partial_unique_test VALUES (1, 800);
+INSERT INTO partial_unique_test VALUES (4, 600);
+INSERT INTO partial_unique_test VALUES (4, 700);
+ERROR:  duplicate key value violates unique constraint "partial_unique_test_a_idx"
+DETAIL:  Key (a)=(4) already exists.
+CREATE TABLE pkey_test (
+    a int,
+    b int
+) USING columnar;
+INSERT INTO pkey_test
+SELECT i, i * 2
+FROM generate_series(1, 1000) i;
+ALTER TABLE pkey_test ADD PRIMARY KEY (a);
+SELECT b FROM pkey_test WHERE a = 980;
+  b   
+------
+ 1960
+(1 row)
+
+INSERT INTO pkey_test VALUES (980, 0);
+ERROR:  duplicate key value violates unique constraint "pkey_test_pkey"
+DETAIL:  Key (a)=(980) already exists.
+REINDEX INDEX pkey_test_pkey;
+INSERT INTO pkey_test VALUES (980, 0);
+ERROR:  duplicate key value violates unique constraint "pkey_test_pkey"
+DETAIL:  Key (a)=(980) already exists.
+CLUSTER pkey_test USING pkey_test_pkey;
+ERROR:  clustering columnar tables using indexes is not supported
+ALTER TABLE pkey_test CLUSTER ON pkey_test_pkey;
+CLUSTER pkey_test;
+ERROR:  clustering columnar tables using indexes is not supported
+RESET enable_seqscan;
+RESET seq_page_cost;
+RESET columnar.enable_custom_scan;
+RESET search_path;
+DROP SCHEMA columnar_indexes CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table columnar_indexes.indexed_table
+drop cascades to table columnar_indexes.partial_unique_test
+drop cascades to table columnar_indexes.pkey_test

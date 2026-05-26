@@ -38,6 +38,8 @@ backend_sources += files(
 
 
 install_data(
+  'columnar_plpgsql.sql',
+  'columnar_system.sql',
   'information_schema.sql',
   'sql_features.txt',
   'system_functions.sql',

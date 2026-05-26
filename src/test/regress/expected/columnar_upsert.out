@@ -1,0 +1,64 @@
+-- ON CONFLICT DO UPDATE coverage for built-in columnar tables.
+CREATE SCHEMA columnar_upsert;
+SET search_path TO columnar_upsert, public;
+SET columnar.compression TO 'none';
+CREATE TABLE upsert_test (
+    i int,
+    t text
+) USING columnar;
+CREATE UNIQUE INDEX upsert_test_t_idx ON upsert_test (t);
+INSERT INTO upsert_test (i, t) VALUES (1, 'hello');
+INSERT INTO upsert_test (i, t) VALUES (2, 'world');
+BEGIN;
+INSERT INTO upsert_test (t) VALUES ('hello')
+ON CONFLICT (t) DO UPDATE SET t = 'foo';
+SELECT * FROM upsert_test ORDER BY i, t;
+ i |   t   
+---+-------
+ 1 | foo
+ 2 | world
+(2 rows)
+
+ROLLBACK;
+SELECT * FROM upsert_test ORDER BY i, t;
+ i |   t   
+---+-------
+ 1 | hello
+ 2 | world
+(2 rows)
+
+INSERT INTO upsert_test (t) VALUES ('hello')
+ON CONFLICT (t) DO UPDATE SET t = 'bar';
+SELECT * FROM upsert_test ORDER BY i, t;
+ i |   t   
+---+-------
+ 1 | bar
+ 2 | world
+(2 rows)
+
+BEGIN;
+INSERT INTO upsert_test (t) VALUES ('world')
+ON CONFLICT (t) DO UPDATE SET t = 'foo';
+SELECT * FROM upsert_test ORDER BY i, t;
+ i |  t  
+---+-----
+ 1 | bar
+ 2 | foo
+(2 rows)
+
+COMMIT;
+DELETE FROM upsert_test;
+BEGIN;
+INSERT INTO upsert_test (i, t) VALUES (1, 'hello');
+INSERT INTO upsert_test (t) VALUES ('hello')
+ON CONFLICT (t) DO UPDATE SET t = 'bar';
+COMMIT;
+SELECT * FROM upsert_test ORDER BY i, t;
+ i |  t  
+---+-----
+ 1 | bar
+(1 row)
+
+RESET search_path;
+DROP SCHEMA columnar_upsert CASCADE;
+NOTICE:  drop cascades to table columnar_upsert.upsert_test

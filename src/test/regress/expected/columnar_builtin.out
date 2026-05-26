@@ -1,0 +1,104 @@
+-- columnar is built into this PostgreSQL tree, not installed as an extension.
+SELECT amname, amtype FROM pg_am WHERE amname = 'columnar';
+  amname  | amtype 
+----------+--------
+ columnar | t
+(1 row)
+
+CREATE TABLE columnar_builtin_table(a int, b text) USING columnar;
+SELECT columnar.alter_columnar_table_set('columnar_builtin_table',
+    compression => 'none',
+    stripe_row_limit => 1000);
+ alter_columnar_table_set 
+--------------------------
+ 
+(1 row)
+
+SELECT compression, stripe_row_limit
+FROM columnar.options
+WHERE regclass = 'columnar_builtin_table'::regclass;
+ compression | stripe_row_limit 
+-------------+------------------
+ none        |             1000
+(1 row)
+
+SELECT columnar.alter_columnar_table_reset('columnar_builtin_table',
+    compression => true,
+    stripe_row_limit => true);
+ alter_columnar_table_reset 
+----------------------------
+ 
+(1 row)
+
+INSERT INTO columnar_builtin_table VALUES (1, 'one'), (2, 'two');
+SELECT * FROM columnar_builtin_table ORDER BY a;
+ a |  b  
+---+-----
+ 1 | one
+ 2 | two
+(2 rows)
+
+SET default_table_access_method = columnar;
+CREATE TABLE columnar_builtin_default(a int);
+RESET default_table_access_method;
+SELECT relname, am.amname
+FROM pg_class c
+JOIN pg_am am ON am.oid = c.relam
+WHERE c.relname IN ('columnar_builtin_table', 'columnar_builtin_default')
+ORDER BY relname;
+         relname          |  amname  
+--------------------------+----------
+ columnar_builtin_default | columnar
+ columnar_builtin_table   | columnar
+(2 rows)
+
+SELECT columnar.vacuum('columnar_builtin_table'::regclass) >= 0 AS vacuum_ok;
+ vacuum_ok 
+-----------
+ t
+(1 row)
+
+SELECT columnar.upgrade_columnar_storage('columnar_builtin_table'::regclass);
+ upgrade_columnar_storage 
+--------------------------
+ 
+(1 row)
+
+SELECT columnar.downgrade_columnar_storage('columnar_builtin_table'::regclass);
+ downgrade_columnar_storage 
+----------------------------
+ 
+(1 row)
+
+SELECT columnar.alter_table_set_access_method('columnar_builtin_default', 'heap') AS converted_to_heap;
+ converted_to_heap 
+-------------------
+ t
+(1 row)
+
+SELECT am.amname
+FROM pg_class c
+JOIN pg_am am ON am.oid = c.relam
+WHERE c.relname = 'columnar_builtin_default';
+ amname 
+--------
+ heap
+(1 row)
+
+SELECT columnar.alter_table_set_access_method('columnar_builtin_default', 'columnar') AS converted_to_columnar;
+ converted_to_columnar 
+-----------------------
+ t
+(1 row)
+
+SELECT am.amname
+FROM pg_class c
+JOIN pg_am am ON am.oid = c.relam
+WHERE c.relname = 'columnar_builtin_default';
+  amname  
+----------
+ columnar
+(1 row)
+
+DROP TABLE columnar_builtin_table;
+DROP TABLE columnar_builtin_default;

@@ -1,0 +1,92 @@
+-- ALTER COLUMN TYPE rewrite coverage for built-in columnar tables.
+CREATE SCHEMA columnar_alter_set_type;
+SET search_path TO columnar_alter_set_type, public;
+SET columnar.compression TO 'none';
+CREATE TABLE alter_type_test(a int, b int, c text) USING columnar;
+INSERT INTO alter_type_test VALUES
+    (1, 2, '3'),
+    (4, 5, '6'),
+    (5, 9, '11'),
+    (12, 83, '93');
+ALTER TABLE alter_type_test
+ALTER COLUMN a TYPE jsonb USING row_to_json(row(a));
+SELECT * FROM alter_type_test ORDER BY a;
+     a      | b  | c  
+------------+----+----
+ {"f1": 1}  |  2 | 3
+ {"f1": 4}  |  5 | 6
+ {"f1": 5}  |  9 | 11
+ {"f1": 12} | 83 | 93
+(4 rows)
+
+ALTER TABLE alter_type_test
+ALTER COLUMN c TYPE int USING c::int;
+SELECT sum(c) FROM alter_type_test;
+ sum 
+-----
+ 113
+(1 row)
+
+ALTER TABLE alter_type_test
+ALTER COLUMN b TYPE bigint;
+SELECT * FROM alter_type_test ORDER BY a;
+     a      | b  | c  
+------------+----+----
+ {"f1": 1}  |  2 |  3
+ {"f1": 4}  |  5 |  6
+ {"f1": 5}  |  9 | 11
+ {"f1": 12} | 83 | 93
+(4 rows)
+
+ALTER TABLE alter_type_test
+ALTER COLUMN b TYPE float4 USING (b::float4 + 0.5);
+SELECT * FROM alter_type_test ORDER BY a;
+     a      |  b   | c  
+------------+------+----
+ {"f1": 1}  |  2.5 |  3
+ {"f1": 4}  |  5.5 |  6
+ {"f1": 5}  |  9.5 | 11
+ {"f1": 12} | 83.5 | 93
+(4 rows)
+
+CREATE TABLE rewrite_options(i int) USING columnar;
+SELECT columnar.alter_columnar_table_set(
+    'rewrite_options',
+    compression => 'pglz',
+    compression_level => 5,
+    stripe_row_limit => 20000,
+    chunk_group_row_limit => 2000);
+ alter_columnar_table_set 
+--------------------------
+ 
+(1 row)
+
+INSERT INTO rewrite_options VALUES (1), (2), (3);
+SELECT compression, compression_level, stripe_row_limit, chunk_group_row_limit
+FROM columnar.options
+WHERE regclass = 'rewrite_options'::regclass;
+ compression | compression_level | stripe_row_limit | chunk_group_row_limit 
+-------------+-------------------+------------------+-----------------------
+ pglz        |                 5 |            20000 |                  2000
+(1 row)
+
+ALTER TABLE rewrite_options ALTER COLUMN i TYPE bigint;
+SELECT count(*), sum(i) FROM rewrite_options;
+ count | sum 
+-------+-----
+     3 |   6
+(1 row)
+
+SELECT compression, compression_level, stripe_row_limit, chunk_group_row_limit
+FROM columnar.options
+WHERE regclass = 'rewrite_options'::regclass;
+ compression | compression_level | stripe_row_limit | chunk_group_row_limit 
+-------------+-------------------+------------------+-----------------------
+ pglz        |                 5 |            20000 |                  2000
+(1 row)
+
+RESET search_path;
+DROP SCHEMA columnar_alter_set_type CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table columnar_alter_set_type.alter_type_test
+drop cascades to table columnar_alter_set_type.rewrite_options

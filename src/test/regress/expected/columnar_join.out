@@ -1,0 +1,72 @@
+-- Join and rescan coverage for built-in columnar tables.
+CREATE SCHEMA columnar_join;
+SET search_path TO columnar_join, public;
+SET columnar.compression TO 'none';
+CREATE TABLE users (id int, name text) USING columnar;
+INSERT INTO users
+SELECT a, 'name' || a
+FROM generate_series(0, 29) AS a;
+CREATE TABLE things (id int, user_id int, name text) USING columnar;
+INSERT INTO things
+SELECT a, a % 30, 'thing' || a
+FROM generate_series(1, 300) AS a;
+SET enable_material TO off;
+SET enable_hashjoin TO off;
+SET enable_mergejoin TO off;
+SELECT count(*)
+FROM users
+JOIN things ON users.id = things.user_id
+WHERE things.id > 290;
+ count 
+-------
+    10
+(1 row)
+
+EXPLAIN (COSTS OFF)
+SELECT count(*)
+FROM users
+JOIN things ON users.id = things.user_id
+WHERE things.id > 299990;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Aggregate
+   ->  Nested Loop
+         ->  Custom Scan (ColumnarScan) on users
+               Columnar Projected Columns: id
+         ->  Custom Scan (ColumnarScan) on things
+               Filter: (users.id = user_id)
+               Columnar Projected Columns: id, user_id
+               Columnar Chunk Group Filters: ((id > 299990) AND (users.id = user_id))
+               Columnar Vectorized Filter: (id > 299990)
+(9 rows)
+
+EXPLAIN (COSTS OFF)
+SELECT u1.id, u2.id, count(u2.*)
+FROM users u1
+JOIN users u2 ON u1.id::text = u2.name
+WHERE u2.id > 299990
+GROUP BY u1.id, u2.id;
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ GroupAggregate
+   Group Key: u1.id, u2.id
+   ->  Sort
+         Sort Key: u1.id, u2.id
+         ->  Nested Loop
+               ->  Custom Scan (ColumnarScan) on users u1
+                     Columnar Projected Columns: id
+               ->  Custom Scan (ColumnarScan) on users u2
+                     Filter: ((u1.id)::text = name)
+                     Columnar Projected Columns: id, name
+                     Columnar Chunk Group Filters: ((id > 299990) AND ((u1.id)::text = name))
+                     Columnar Vectorized Filter: (id > 299990)
+(12 rows)
+
+RESET enable_material;
+RESET enable_hashjoin;
+RESET enable_mergejoin;
+RESET search_path;
+DROP SCHEMA columnar_join CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table columnar_join.users
+drop cascades to table columnar_join.things

@@ -48,7 +48,97 @@ test: create_index create_index_spgist create_view index_including index_includi
 # ----------
 # Another group of parallel tests
 # ----------
-test: create_aggregate create_function_sql create_cast constraints triggers select inherit typed_table vacuum drop_if_exists updatable_views roleattributes create_am hash_func errors infinite_recurse
+test: create_aggregate create_function_sql create_cast constraints triggers select inherit typed_table vacuum drop_if_exists updatable_views roleattributes create_am columnar_builtin columnar_dml columnar_ops columnar_mutation hash_func errors infinite_recurse
+
+# columnar_permissions creates/drops a role and reconnects.
+test: columnar_permissions
+
+# columnar_metadata inspects global columnar metadata tables.
+test: columnar_metadata
+
+# columnar_tableoptions checks table-local options and expected option errors.
+test: columnar_tableoptions
+
+# columnar_matview inspects global columnar metadata for materialized views.
+test: columnar_matview
+
+# columnar_recursive exercises nested writes and subtransaction cleanup.
+test: columnar_recursive
+
+# columnar_cursor exercises scroll cursors over columnar scans.
+test: columnar_cursor
+
+# columnar_trigger checks supported statement/row trigger behavior and rejections.
+test: columnar_trigger
+
+# columnar_first_row_number inspects global columnar stripe metadata.
+test: columnar_first_row_number
+
+# columnar_cache toggles backend-local cache state.
+test: columnar_cache
+
+# columnar_indexes uses index scans and global relcache/index state.
+test: columnar_indexes
+
+# columnar_chunk_filtering inspects EXPLAIN ANALYZE chunk filter counters.
+test: columnar_chunk_filtering
+
+# columnar_alter_table_set_access_method rewrites table storage and dependent objects.
+test: columnar_alter_table_set_access_method
+
+# columnar_vacuum_udf rewrites columnar stripes and metadata.
+test: columnar_vacuum_udf
+
+# columnar_partitioning checks partition routing and columnar metadata cleanup.
+test: columnar_partitioning
+
+# columnar_empty exercises maintenance paths on empty columnar tables.
+test: columnar_empty
+
+# columnar_transactions exercises xact/subxact rollback and prepared statements.
+test: columnar_transactions
+
+# columnar_insert covers direct inserts, INSERT SELECT, toast, and publication checks.
+test: columnar_insert
+
+# columnar_query covers scans, aggregates, system column errors, and lateral joins.
+test: columnar_query
+
+# columnar_update_delete covers DML row masks and mixed partition updates.
+test: columnar_update_delete
+
+# columnar_upsert covers unique-index conflict arbitration and rollback.
+test: columnar_upsert
+
+# columnar_join forces nested-loop rescans over columnar scans.
+test: columnar_join
+
+# columnar_rollback checks xact/subxact row and metadata rollback.
+test: columnar_rollback
+
+# columnar_alter covers ALTER TABLE shape/default/constraint changes.
+test: columnar_alter
+
+# columnar_analyze covers statistics generation on columnar tables.
+test: columnar_analyze
+
+# columnar_types_without_comparison checks min/max metadata for uncommon types.
+test: columnar_types_without_comparison
+
+# columnar_fallback_scan disables custom scan and verifies heap-style scan fallback.
+test: columnar_fallback_scan
+
+# columnar_aggregates covers vector aggregate planning and fallback paths.
+test: columnar_aggregates
+
+# columnar_alter_set_type covers table rewrites from ALTER COLUMN TYPE.
+test: columnar_alter_set_type
+
+# columnar_drop checks metadata cleanup for DROP TABLE and DROP SCHEMA CASCADE.
+test: columnar_drop
+
+# columnar_create covers CTAS and temporary columnar table lifecycle.
+test: columnar_create
 
 # ----------
 # sanity_check does a vacuum, affecting the sort order of SELECT *

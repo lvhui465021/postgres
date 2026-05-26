@@ -34,6 +34,7 @@
 #include "access/parallel.h"
 #include "access/printtup.h"
 #include "access/xact.h"
+#include "columnar/columnar.h"
 #include "catalog/pg_type.h"
 #include "commands/async.h"
 #include "commands/event_trigger.h"
@@ -4066,6 +4067,7 @@ PostgresSingleUserMain(int argc, char *argv[],
 	 * Set default values for command-line options.
 	 */
 	InitializeGUCOptions();
+	columnar_init();
 
 	/*
 	 * Parse command-line options.

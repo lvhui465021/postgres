@@ -52,6 +52,8 @@ include $(top_srcdir)/src/backend/common.mk
 
 .PHONY: install-data
 install-data: installdirs
+	$(INSTALL_DATA) $(srcdir)/columnar_system.sql '$(DESTDIR)$(datadir)/columnar_system.sql'
+	$(INSTALL_DATA) $(srcdir)/columnar_plpgsql.sql '$(DESTDIR)$(datadir)/columnar_plpgsql.sql'
 	$(INSTALL_DATA) $(srcdir)/system_functions.sql '$(DESTDIR)$(datadir)/system_functions.sql'
 	$(INSTALL_DATA) $(srcdir)/system_views.sql '$(DESTDIR)$(datadir)/system_views.sql'
 	$(INSTALL_DATA) $(srcdir)/information_schema.sql '$(DESTDIR)$(datadir)/information_schema.sql'
@@ -62,4 +64,4 @@ installdirs:
 
 .PHONY: uninstall-data
 uninstall-data:
-	rm -f $(addprefix '$(DESTDIR)$(datadir)'/, system_functions.sql system_views.sql information_schema.sql sql_features.txt)
+	rm -f $(addprefix '$(DESTDIR)$(datadir)'/, columnar_system.sql columnar_plpgsql.sql system_functions.sql system_views.sql information_schema.sql sql_features.txt)

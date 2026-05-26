@@ -1832,10 +1832,11 @@ WHERE p1.oid < p2.oid AND p1.proname = p2.proname AND
     p1.prokind = 'a' AND p2.prokind = 'a' AND
     array_dims(p1.proargtypes) != array_dims(p2.proargtypes)
 ORDER BY 1;
-     oid      |   oid   
---------------+---------
- count("any") | count()
-(1 row)
+        oid        |          oid           
+-------------------+------------------------
+ count("any")      | count()
+ columnar.vcount() | columnar.vcount("any")
+(2 rows)
 
 -- For the same reason, built-in aggregates with default arguments are no good.
 SELECT oid, proname

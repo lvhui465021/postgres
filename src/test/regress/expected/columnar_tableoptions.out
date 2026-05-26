@@ -1,0 +1,157 @@
+-- Table option coverage for built-in columnar tables.
+CREATE SCHEMA columnar_tableoptions;
+SET search_path TO columnar_tableoptions, public;
+SET columnar.compression TO 'none';
+CREATE TABLE table_options(a int) USING columnar;
+INSERT INTO table_options SELECT generate_series(1, 100);
+SELECT compression, compression_level, stripe_row_limit, chunk_group_row_limit
+FROM columnar.options
+WHERE regclass = 'table_options'::regclass;
+ compression | compression_level | stripe_row_limit | chunk_group_row_limit 
+-------------+-------------------+------------------+-----------------------
+ none        |                 3 |           150000 |                 10000
+(1 row)
+
+SELECT columnar.alter_columnar_table_set('table_options', compression => 'pglz');
+ alter_columnar_table_set 
+--------------------------
+ 
+(1 row)
+
+SELECT columnar.alter_columnar_table_set('table_options', compression_level => 5);
+ alter_columnar_table_set 
+--------------------------
+ 
+(1 row)
+
+SELECT columnar.alter_columnar_table_set('table_options', chunk_group_row_limit => 2000);
+ alter_columnar_table_set 
+--------------------------
+ 
+(1 row)
+
+SELECT columnar.alter_columnar_table_set('table_options', stripe_row_limit => 4000);
+ alter_columnar_table_set 
+--------------------------
+ 
+(1 row)
+
+SELECT compression, compression_level, stripe_row_limit, chunk_group_row_limit
+FROM columnar.options
+WHERE regclass = 'table_options'::regclass;
+ compression | compression_level | stripe_row_limit | chunk_group_row_limit 
+-------------+-------------------+------------------+-----------------------
+ pglz        |                 5 |             4000 |                  2000
+(1 row)
+
+VACUUM table_options;
+VACUUM FULL table_options;
+TRUNCATE table_options;
+ALTER TABLE table_options ALTER COLUMN a TYPE bigint;
+SELECT compression, compression_level, stripe_row_limit, chunk_group_row_limit
+FROM columnar.options
+WHERE regclass = 'table_options'::regclass;
+ compression | compression_level | stripe_row_limit | chunk_group_row_limit 
+-------------+-------------------+------------------+-----------------------
+ pglz        |                 5 |             4000 |                  2000
+(1 row)
+
+SET columnar.chunk_group_row_limit TO 1000;
+SET columnar.stripe_row_limit TO 10000;
+SET columnar.compression TO 'pglz';
+SET columnar.compression_level TO 11;
+SELECT columnar.alter_columnar_table_reset('table_options', chunk_group_row_limit => true);
+ alter_columnar_table_reset 
+----------------------------
+ 
+(1 row)
+
+SELECT columnar.alter_columnar_table_reset('table_options', stripe_row_limit => true);
+ alter_columnar_table_reset 
+----------------------------
+ 
+(1 row)
+
+SELECT columnar.alter_columnar_table_reset('table_options', compression => true);
+ alter_columnar_table_reset 
+----------------------------
+ 
+(1 row)
+
+SELECT columnar.alter_columnar_table_reset('table_options', compression_level => true);
+ alter_columnar_table_reset 
+----------------------------
+ 
+(1 row)
+
+SELECT compression, compression_level, stripe_row_limit, chunk_group_row_limit
+FROM columnar.options
+WHERE regclass = 'table_options'::regclass;
+ compression | compression_level | stripe_row_limit | chunk_group_row_limit 
+-------------+-------------------+------------------+-----------------------
+ pglz        |                11 |            10000 |                  1000
+(1 row)
+
+SET columnar.chunk_group_row_limit TO 10000;
+SET columnar.stripe_row_limit TO 100000;
+SET columnar.compression TO 'none';
+SET columnar.compression_level TO 13;
+SELECT columnar.alter_columnar_table_reset(
+    'table_options',
+    chunk_group_row_limit => true,
+    stripe_row_limit => true,
+    compression => true,
+    compression_level => true);
+ alter_columnar_table_reset 
+----------------------------
+ 
+(1 row)
+
+SELECT compression, compression_level, stripe_row_limit, chunk_group_row_limit
+FROM columnar.options
+WHERE regclass = 'table_options'::regclass;
+ compression | compression_level | stripe_row_limit | chunk_group_row_limit 
+-------------+-------------------+------------------+-----------------------
+ none        |                13 |           100000 |                 10000
+(1 row)
+
+CREATE TABLE not_a_columnar_table(a int);
+SELECT columnar.alter_columnar_table_set('not_a_columnar_table', compression => 'pglz');
+ERROR:  table not_a_columnar_table is not a columnar table
+SELECT columnar.alter_columnar_table_reset('not_a_columnar_table', compression => true);
+ERROR:  table not_a_columnar_table is not a columnar table
+SELECT columnar.alter_columnar_table_set('table_options', compression => 'foobar');
+ERROR:  unknown compression type for columnar table: foobar
+SELECT columnar.alter_columnar_table_set('table_options', compression_level => 0);
+ERROR:  compression level out of range
+HINT:  compression level must be between 1 and 19
+SELECT columnar.alter_columnar_table_set('table_options', compression_level => 20);
+ERROR:  compression level out of range
+HINT:  compression level must be between 1 and 19
+SELECT columnar.alter_columnar_table_set('table_options', stripe_row_limit => 999);
+ERROR:  stripe row count limit out of range
+HINT:  stripe row count limit must be between 1000 and 100000000
+SELECT columnar.alter_columnar_table_set('table_options', stripe_row_limit => 100000001);
+ERROR:  stripe row count limit out of range
+HINT:  stripe row count limit must be between 1000 and 100000000
+SELECT columnar.alter_columnar_table_set('table_options', chunk_group_row_limit => 999);
+ERROR:  chunk group row count limit out of range
+HINT:  chunk group row count limit must be between 1000 and 100000000
+SELECT columnar.alter_columnar_table_set('table_options', chunk_group_row_limit => 100000001);
+ERROR:  chunk group row count limit out of range
+HINT:  chunk group row count limit must be between 1000 and 100000000
+SELECT columnar.alter_columnar_table_set('table_options', chunk_group_row_limit => 0);
+ERROR:  chunk group row count limit out of range
+HINT:  chunk group row count limit must be between 1000 and 100000000
+DROP TABLE table_options;
+SELECT count(*) AS orphaned_options
+FROM columnar.options o
+WHERE o.regclass NOT IN (SELECT oid FROM pg_class);
+ orphaned_options 
+------------------
+                0
+(1 row)
+
+RESET search_path;
+DROP SCHEMA columnar_tableoptions CASCADE;
+NOTICE:  drop cascades to table columnar_tableoptions.not_a_columnar_table

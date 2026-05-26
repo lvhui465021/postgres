@@ -1,0 +1,101 @@
+-- columnar.vacuum() coverage for built-in columnar tables.
+CREATE SCHEMA columnar_vacuum_udf;
+SET search_path TO columnar_vacuum_udf, public;
+SET columnar.compression TO 'none';
+SET columnar.chunk_group_row_limit TO 1000;
+SET columnar.stripe_row_limit TO 4000;
+CREATE TABLE vacuum_target(a int, b int) USING columnar;
+INSERT INTO vacuum_target
+SELECT i, i * 2
+FROM generate_series(1, 10000) i;
+SELECT count(*) AS stats_before_delete,
+       sum(rowcount) AS rows_before_delete,
+       sum(deletedrows) AS deleted_before_delete
+FROM columnar.stats('vacuum_target'::regclass);
+ stats_before_delete | rows_before_delete | deleted_before_delete 
+---------------------+--------------------+-----------------------
+                   3 |              10000 |                     0
+(1 row)
+
+SELECT columnar.vacuum('vacuum_target'::regclass) AS vacuum_without_deletes;
+ vacuum_without_deletes 
+------------------------
+                      0
+(1 row)
+
+DELETE FROM vacuum_target WHERE a % 2 = 0;
+SELECT count(*), sum(a), sum(b) FROM vacuum_target;
+ count |   sum    |   sum    
+-------+----------+----------
+  5000 | 25000000 | 50000000
+(1 row)
+
+SELECT sum(deletedrows) AS deleted_before_vacuum
+FROM columnar.stats('vacuum_target'::regclass);
+ deleted_before_vacuum 
+-----------------------
+                  5000
+(1 row)
+
+SELECT columnar.vacuum('vacuum_target'::regclass) AS vacuum_after_deletes;
+ vacuum_after_deletes 
+----------------------
+                    6
+(1 row)
+
+SELECT count(*), sum(a), sum(b) FROM vacuum_target;
+ count |   sum    |   sum    
+-------+----------+----------
+  5000 | 25000000 | 50000000
+(1 row)
+
+SELECT count(*) AS stats_after_vacuum,
+       sum(rowcount) AS rows_after_vacuum,
+       sum(deletedrows) AS deleted_after_vacuum
+FROM columnar.stats('vacuum_target'::regclass);
+ stats_after_vacuum | rows_after_vacuum | deleted_after_vacuum 
+--------------------+-------------------+----------------------
+                  2 |              5000 |                    0
+(1 row)
+
+INSERT INTO vacuum_target
+SELECT i, i * 2
+FROM generate_series(10001, 12000) i;
+DELETE FROM vacuum_target WHERE a BETWEEN 11000 AND 12000;
+SELECT columnar.vacuum('vacuum_target'::regclass, 1) AS vacuum_one_stripe;
+ vacuum_one_stripe 
+-------------------
+                 1
+(1 row)
+
+SELECT count(*), sum(a), sum(b) FROM vacuum_target;
+ count |   sum    |   sum    
+-------+----------+----------
+  5999 | 35489500 | 70979000
+(1 row)
+
+CREATE TABLE cache_test(i int) USING columnar;
+INSERT INTO cache_test SELECT generate_series(1, 100);
+SET columnar.enable_column_cache TO 'on';
+VACUUM cache_test;
+SHOW columnar.enable_column_cache;
+ columnar.enable_column_cache 
+------------------------------
+ on
+(1 row)
+
+ANALYZE cache_test;
+SHOW columnar.enable_column_cache;
+ columnar.enable_column_cache 
+------------------------------
+ on
+(1 row)
+
+RESET columnar.enable_column_cache;
+RESET columnar.stripe_row_limit;
+RESET columnar.chunk_group_row_limit;
+RESET search_path;
+DROP SCHEMA columnar_vacuum_udf CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table columnar_vacuum_udf.vacuum_target
+drop cascades to table columnar_vacuum_udf.cache_test
