@@ -59,6 +59,7 @@
 #include "commands/view.h"
 #include "commands/wait.h"
 #include "miscadmin.h"
+#include "parser/extmerge_demo.h"
 #include "parser/parse_utilcmd.h"
 #include "postmaster/bgwriter.h"
 #include "rewrite/rewriteDefine.h"
@@ -267,6 +268,7 @@ ClassifyUtilityCommandAsReadOnly(Node *parsetree)
 		case T_ExecuteStmt:
 		case T_FetchStmt:
 		case T_LoadStmt:
+		case T_ExtMergeStmt:
 		case T_PrepareStmt:
 		case T_UnlistenStmt:
 		case T_VariableSetStmt:
@@ -852,6 +854,16 @@ standard_ProcessUtility(PlannedStmt *pstmt,
 				closeAllVfds(); /* probably not necessary... */
 				/* Allowed names are restricted if you're not superuser */
 				load_file(stmt->filename, !superuser());
+			}
+			break;
+
+		case T_ExtMergeStmt:
+			{
+				ExtMergeStmt *stmt = (ExtMergeStmt *) parsetree;
+
+				extmerge_process_stmt(stmt->srcRelation, stmt->refRelation,
+									  stmt->dstRelation, stmt->limitType,
+									  stmt->limitCount, stmt->tmColumns);
 			}
 			break;
 
@@ -2880,6 +2892,10 @@ CreateCommandTag(Node *parsetree)
 			tag = CMDTAG_LOAD;
 			break;
 
+		case T_ExtMergeStmt:
+			tag = CMDTAG_EXTMERGE;
+			break;
+
 		case T_CallStmt:
 			tag = CMDTAG_CALL;
 			break;
@@ -3540,6 +3556,10 @@ GetCommandLogLevel(Node *parsetree)
 			break;
 
 		case T_LoadStmt:
+			lev = LOGSTMT_ALL;
+			break;
+
+		case T_ExtMergeStmt:
 			lev = LOGSTMT_ALL;
 			break;
 

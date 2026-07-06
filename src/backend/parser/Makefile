@@ -14,6 +14,7 @@ override CPPFLAGS := -I. -I$(srcdir) $(CPPFLAGS)
 
 OBJS = \
 	analyze.o \
+	extmerge_demo.o \
 	gram.o \
 	parse_agg.o \
 	parse_clause.o \

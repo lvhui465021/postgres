@@ -4000,6 +4000,24 @@ typedef struct LoadStmt
 } LoadStmt;
 
 /* ----------------------
+ *		EXTMERGE Statement
+ *
+ * 使用 EXTMERGE 语法进行跨表数据合并操作（Node节点方式）。
+ * 语法: EXTMERGE src_tbl, ref_tbl TO dst_tbl [ALL|LAST n|FIRST n] [TM(col1,...)]
+ * ----------------------
+ */
+typedef struct ExtMergeStmt
+{
+	NodeTag		type;
+	RangeVar   *srcRelation;	/* 源表 */
+	RangeVar   *refRelation;	/* 引用表 */
+	RangeVar   *dstRelation;	/* 目标表 */
+	char	   *limitType;		/* NULL表示默认ALL, "ALL", "LAST", "FIRST" */
+	int			limitCount;		/* LAST n / FIRST n 中的 n */
+	List	   *tmColumns;		/* TM 列名列表 (list of String) */
+} ExtMergeStmt;
+
+/* ----------------------
  *		Createdb Statement
  * ----------------------
  */

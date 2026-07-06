@@ -58,6 +58,7 @@
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "parser/parser.h"
+#include "parser/extmerge_demo.h"
 #include "utils/datetime.h"
 #include "utils/xml.h"
 
@@ -123,6 +124,13 @@ typedef struct GroupClause
 	bool		all;
 	List	   *list;
 } GroupClause;
+
+/* Private struct for the result of opt_extmerge_limit production */
+typedef struct ExtMergeLimit
+{
+	char	   *limitType;		/* NULL, "ALL", "LAST", "FIRST" */
+	int			limitCount;		/* n for LAST n / FIRST n */
+} ExtMergeLimit;
 
 /* Private structs for the result of key_actions and key_action productions */
 typedef struct KeyAction
@@ -269,6 +277,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 	PublicationAllObjSpec *publicationallobjectspec;
 	struct SelectLimit *selectlimit;
 	SetQuantifier setquantifier;
+	struct ExtMergeLimit *extmergelimit;
 	struct GroupClause *groupclause;
 	MergeMatchKind mergematch;
 	MergeWhenClause *mergewhen;
@@ -421,6 +430,9 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 %type <importqual> import_qualification
 %type <node>	vacuum_relation
 %type <selectlimit> opt_select_limit select_limit limit_clause
+%type <node>	ExtMergeStmt ExtMergeFuncStmt
+%type <extmergelimit> opt_extmerge_limit
+%type <list>	opt_extmerge_tm extmerge_tm_list
 
 %type <list>	parse_toplevel stmtmulti routine_body_stmt_list
 				OptTableElementList TableElementList OptInherit definition
@@ -766,7 +778,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 
 	EACH EDGE ELSE EMPTY_P ENABLE_P ENCODING ENCRYPTED END_P ENFORCED ENUM_P
 	ERROR_P ESCAPE EVENT EXCEPT EXCLUDE EXCLUDING EXCLUSIVE EXECUTE EXISTS
-	EXPLAIN EXPRESSION EXTENSION EXTERNAL EXTRACT
+	EXPLAIN EXPRESSION EXTENSION EXTERNAL EXTMERGE EXTMERGEF EXTRACT
 
 	FALSE_P FAMILY FETCH FILTER FINALIZE FIRST_P FLOAT_P FOLLOWING FOR
 	FORCE FOREIGN FORMAT FORWARD FREEZE FROM FULL FUNCTION FUNCTIONS
@@ -821,7 +833,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 	SUBSCRIPTION SUBSTRING SUPPORT SYMMETRIC SYSID SYSTEM_P SYSTEM_USER
 
 	TABLE TABLES TABLESAMPLE TABLESPACE TARGET TEMP TEMPLATE TEMPORARY TEXT_P THEN
-	TIES TIME TIMESTAMP TO TRAILING TRANSACTION TRANSFORM
+	TIES TIME TIMESTAMP TM TO TRAILING TRANSACTION TRANSFORM
 	TREAT TRIGGER TRIM TRUE_P
 	TRUNCATE TRUSTED TYPE_P TYPES_P
 
@@ -1130,6 +1142,8 @@ stmt:
 			| DropdbStmt
 			| ExecuteStmt
 			| ExplainStmt
+			| ExtMergeFuncStmt
+			| ExtMergeStmt
 			| FetchStmt
 			| GrantStmt
 			| GrantRoleStmt
@@ -12128,6 +12142,105 @@ LoadStmt:	LOAD file_name
  *
  *****************************************************************************/
 
+/*****************************************************************************
+ *
+ *	EXTMERGE 语法 —— 跨表数据合并操作
+ *
+ * 语法:
+ *   EXTMERGE src_db.src_tbl, ref_db.ref_tbl TO dst_db.dst_tbl
+ *       [ ALL | LAST n | FIRST n ]
+ *       [ TM ( col1 [, ...] ) ]
+ *
+ * 实现两种方式：
+ *   ExtMergeStmt:      Node节点方式（方式一）
+ *   ExtMergeFuncStmt:  函数调用方式（方式二）
+ *
+ *****************************************************************************/
+
+/*
+ * 方式一：ExtMergeStmt —— Node 节点方式
+ * 通过创建 Node，遵循标准流程：语法分析 → 创建Node → utility.c → 执行
+ */
+ExtMergeStmt:
+		EXTMERGE qualified_name ',' qualified_name TO qualified_name
+		opt_extmerge_limit opt_extmerge_tm
+			{
+				ExtMergeStmt *n = makeNode(ExtMergeStmt);
+
+				n->srcRelation = $2;
+				n->refRelation = $4;
+				n->dstRelation = $6;
+				if ($7 != NULL)
+				{
+					n->limitType = $7->limitType;
+					n->limitCount = $7->limitCount;
+				}
+				else
+				{
+					n->limitType = NULL;
+					n->limitCount = 0;
+				}
+				n->tmColumns = $8;
+				$$ = (Node *) n;
+			}
+	;
+
+/*
+ * 方式二：ExtMergeFuncStmt —— 函数调用方式
+ * 在语法动作中直接调用 C 函数，绕过 Node 体系
+ */
+ExtMergeFuncStmt:
+		EXTMERGEF qualified_name ',' qualified_name TO qualified_name
+		opt_extmerge_limit opt_extmerge_tm
+			{
+				/* 直接在语法分析阶段调用函数处理 */
+				extmerge_handle_direct($2, $4, $6,
+									   $7 ? $7->limitType : NULL,
+									   $7 ? $7->limitCount : 0,
+									   $8);
+				$$ = NULL;
+			}
+	;
+
+opt_extmerge_limit:
+		ALL
+			{
+				ExtMergeLimit *lim = palloc_object(ExtMergeLimit);
+				lim->limitType = "ALL";
+				lim->limitCount = 0;
+				$$ = lim;
+			}
+	| LAST_P ICONST
+			{
+				ExtMergeLimit *lim = palloc_object(ExtMergeLimit);
+				lim->limitType = "LAST";
+				lim->limitCount = $2;
+				$$ = lim;
+			}
+	| FIRST_P ICONST
+			{
+				ExtMergeLimit *lim = palloc_object(ExtMergeLimit);
+				lim->limitType = "FIRST";
+				lim->limitCount = $2;
+				$$ = lim;
+			}
+	| /*EMPTY*/
+			{
+				$$ = NULL;
+			}
+	;
+
+opt_extmerge_tm:
+		TM '(' extmerge_tm_list ')'	{ $$ = $3; }
+	| /*EMPTY*/						{ $$ = NIL; }
+	;
+
+extmerge_tm_list:
+		ColId							{ $$ = list_make1(makeString($1)); }
+	| extmerge_tm_list ',' ColId		{ $$ = lappend($1, makeString($3)); }
+	;
+
+
 CreatedbStmt:
 			CREATE DATABASE name opt_with createdb_opt_list
 				{
@@ -18919,6 +19032,8 @@ unreserved_keyword:
 			| EXPRESSION
 			| EXTENSION
 			| EXTERNAL
+			| EXTMERGE
+			| EXTMERGEF
 			| FAMILY
 			| FILTER
 			| FINALIZE
@@ -19127,6 +19242,7 @@ unreserved_keyword:
 			| TEMPORARY
 			| TEXT_P
 			| TIES
+			| TM
 			| TRANSACTION
 			| TRANSFORM
 			| TRIGGER
