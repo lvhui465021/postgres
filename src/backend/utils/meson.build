@@ -1,5 +1,9 @@
 # Copyright (c) 2022-2026, PostgreSQL Global Development Group
 
+backend_sources += files(
+  'spi_demo.c',
+)
+
 install_data('errcodes.txt',
   install_dir: dir_data,
 )

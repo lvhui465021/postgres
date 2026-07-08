@@ -13,7 +13,7 @@ subdir = src/backend/utils
 top_builddir = ../../..
 include $(top_builddir)/src/Makefile.global
 
-OBJS        = fmgrtab.o
+OBJS        = fmgrtab.o spi_demo.o
 SUBDIRS     = \
 	activity \
 	adt \
