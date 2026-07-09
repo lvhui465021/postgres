@@ -1134,6 +1134,34 @@ create_index_path(PlannerInfo *root,
 }
 
 /*
+ * create_fake_index_path
+ *	  Copy an IndexPath into a FakeIndexPath and recost it.
+ */
+FakeIndexPath *
+create_fake_index_path(PlannerInfo *root,
+					   IndexPath *source,
+					   double loop_count,
+					   bool partial_path)
+{
+	FakeIndexPath *pathnode = makeNode(FakeIndexPath);
+
+	/*
+	 * The child IndexPath contains all the lists and planner-owned objects
+	 * needed to produce the same scan.  A flat copy is sufficient because
+	 * both paths have the same planner-lifetime ownership.
+	 */
+	memcpy(&pathnode->indexpath, source, sizeof(IndexPath));
+	NodeSetTag(pathnode, T_FakeIndexPath);
+
+	cost_index(&pathnode->indexpath, root, loop_count, partial_path);
+
+	/* Preserve per-index disabling, which cost_index cannot determine. */
+	pathnode->indexpath.path.disabled_nodes = source->path.disabled_nodes;
+
+	return pathnode;
+}
+
+/*
  * create_bitmap_heap_path
  *	  Creates a path node for a bitmap scan.
  *
@@ -3933,7 +3961,12 @@ reparameterize_path(PlannerInfo *root, Path *path,
 		case T_IndexOnlyScan:
 			{
 				IndexPath  *ipath = (IndexPath *) path;
-				IndexPath  *newpath = makeNode(IndexPath);
+				IndexPath  *newpath;
+
+				if (IsA(path, FakeIndexPath))
+					newpath = (IndexPath *) makeNode(FakeIndexPath);
+				else
+					newpath = makeNode(IndexPath);
 
 				/*
 				 * We can't use create_index_path directly, and would not want
@@ -4157,6 +4190,7 @@ do { \
 			break;
 
 		case T_IndexPath:
+		case T_FakeIndexPath:
 			{
 				IndexPath  *ipath = (IndexPath *) path;
 
@@ -4410,6 +4444,7 @@ do { \
 	{
 		case T_Path:
 		case T_IndexPath:
+		case T_FakeIndexPath:
 			break;
 
 		case T_BitmapHeapPath:

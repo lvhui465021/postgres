@@ -747,7 +747,15 @@ get_index_paths(PlannerInfo *root, RelOptInfo *rel,
 		IndexPath  *ipath = (IndexPath *) lfirst(lc);
 
 		if (index->amhasgettuple)
+		{
+			double		loop_count;
+
+			loop_count = get_loop_count(root, rel->relid,
+										PATH_REQ_OUTER(&ipath->path));
 			add_path(rel, (Path *) ipath);
+			add_path(rel, (Path *) create_fake_index_path(root, ipath,
+														 loop_count, false));
+		}
 
 		if (index->amhasgetbitmap &&
 			(ipath->path.pathkeys == NIL ||
@@ -1001,7 +1009,14 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 			 * parallel workers, just free it.
 			 */
 			if (ipath->path.parallel_workers > 0)
+			{
+				FakeIndexPath *fpath;
+
+				fpath = create_fake_index_path(root, ipath,
+											   loop_count, true);
 				add_partial_path(rel, (Path *) ipath);
+				add_partial_path(rel, (Path *) fpath);
+			}
 			else
 				pfree(ipath);
 		}
@@ -1051,7 +1066,14 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
 				 * using parallel workers, just free it.
 				 */
 				if (ipath->path.parallel_workers > 0)
+				{
+					FakeIndexPath *fpath;
+
+					fpath = create_fake_index_path(root, ipath,
+												   loop_count, true);
 					add_partial_path(rel, (Path *) ipath);
+					add_partial_path(rel, (Path *) fpath);
+				}
 				else
 					pfree(ipath);
 			}

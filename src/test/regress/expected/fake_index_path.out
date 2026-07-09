@@ -1,0 +1,104 @@
+--
+-- FakeIndexPath
+--
+CREATE TABLE fake_index_path_inner
+(
+	id integer NOT NULL,
+	payload text NOT NULL
+);
+INSERT INTO fake_index_path_inner
+SELECT g, 'value-' || g
+FROM generate_series(1, 1000) AS g;
+CREATE UNIQUE INDEX fake_index_path_inner_id_idx
+ON fake_index_path_inner (id);
+VACUUM ANALYZE fake_index_path_inner;
+-- A FakeIndexPath should retain ordinary IndexScan semantics and have zero
+-- startup and total cost.
+EXPLAIN (COSTS ON)
+SELECT payload
+FROM fake_index_path_inner
+WHERE id = 500;
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Index Scan using fake_index_path_inner_id_idx on fake_index_path_inner  (cost=0.00..0.00 rows=1 width=9)
+   Index Cond: (id = 500)
+(2 rows)
+
+SELECT payload
+FROM fake_index_path_inner
+WHERE id = 500;
+  payload  
+-----------
+ value-500
+(1 row)
+
+-- FakeIndexPath can also represent an IndexOnlyScan.
+EXPLAIN (COSTS ON)
+SELECT id
+FROM fake_index_path_inner
+WHERE id = 500;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+ Index Only Scan using fake_index_path_inner_id_idx on fake_index_path_inner  (cost=0.00..0.00 rows=1 width=4)
+   Index Cond: (id = 500)
+(2 rows)
+
+SELECT id
+FROM fake_index_path_inner
+WHERE id = 500;
+ id  
+-----
+ 500
+(1 row)
+
+CREATE TABLE fake_index_path_outer (id integer NOT NULL);
+INSERT INTO fake_index_path_outer VALUES (1), (500);
+ANALYZE fake_index_path_outer;
+-- The parameterized FakeIndexPath remains usable on the inner side of a
+-- nested loop.
+SET enable_hashjoin = off;
+SET enable_mergejoin = off;
+EXPLAIN (COSTS OFF)
+SELECT o.id, i.payload
+FROM fake_index_path_outer o
+JOIN fake_index_path_inner i USING (id)
+ORDER BY o.id;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Sort
+   Sort Key: o.id
+   ->  Nested Loop
+         ->  Seq Scan on fake_index_path_outer o
+         ->  Index Scan using fake_index_path_inner_id_idx on fake_index_path_inner i
+               Index Cond: (id = o.id)
+(6 rows)
+
+SELECT o.id, i.payload
+FROM fake_index_path_outer o
+JOIN fake_index_path_inner i USING (id)
+ORDER BY o.id;
+ id  |  payload  
+-----+-----------
+   1 | value-1
+ 500 | value-500
+(2 rows)
+
+RESET enable_hashjoin;
+RESET enable_mergejoin;
+-- FakeIndexPath must preserve disabled_nodes and honor enable_indexscan.
+SET enable_indexscan = off;
+SET enable_bitmapscan = off;
+EXPLAIN (COSTS OFF)
+SELECT payload
+FROM fake_index_path_inner
+WHERE id = 500;
+            QUERY PLAN             
+-----------------------------------
+ Seq Scan on fake_index_path_inner
+   Filter: (id = 500)
+(2 rows)
+
+RESET enable_indexscan;
+RESET enable_bitmapscan;
+DROP TABLE fake_index_path_outer;
+DROP TABLE fake_index_path_inner;

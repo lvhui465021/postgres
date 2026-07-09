@@ -572,7 +572,10 @@ create_scan_plan(PlannerInfo *root, Path *best_path, int flags)
 	{
 		case T_IndexScan:
 		case T_IndexOnlyScan:
-			scan_clauses = castNode(IndexPath, best_path)->indexinfo->indrestrictinfo;
+			Assert(IsA(best_path, IndexPath) ||
+				   IsA(best_path, FakeIndexPath));
+			scan_clauses =
+				((IndexPath *) best_path)->indexinfo->indrestrictinfo;
 			break;
 		default:
 			scan_clauses = rel->baserestrictinfo;

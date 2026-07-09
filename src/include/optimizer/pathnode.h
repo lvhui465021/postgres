@@ -79,6 +79,10 @@ extern IndexPath *create_index_path(PlannerInfo *root,
 									Relids required_outer,
 									double loop_count,
 									bool partial_path);
+extern FakeIndexPath *create_fake_index_path(PlannerInfo *root,
+											 IndexPath *source,
+											 double loop_count,
+											 bool partial_path);
 extern BitmapHeapPath *create_bitmap_heap_path(PlannerInfo *root,
 											   RelOptInfo *rel,
 											   Path *bitmapqual,

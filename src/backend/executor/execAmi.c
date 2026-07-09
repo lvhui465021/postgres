@@ -431,7 +431,9 @@ ExecSupportsMarkRestore(Path *pathnode)
 			/*
 			 * Not all index types support mark/restore.
 			 */
-			return castNode(IndexPath, pathnode)->indexinfo->amcanmarkpos;
+			Assert(IsA(pathnode, IndexPath) ||
+				   IsA(pathnode, FakeIndexPath));
+			return ((IndexPath *) pathnode)->indexinfo->amcanmarkpos;
 
 		case T_Material:
 		case T_Sort:

@@ -817,6 +817,13 @@ cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
 
 	path->path.startup_cost = startup_cost;
 	path->path.total_cost = startup_cost + run_cost;
+
+	/* Make FakeIndexPath win cost comparisons without changing its semantics. */
+	if (IsA(path, FakeIndexPath))
+	{
+		path->path.startup_cost = 0.0;
+		path->path.total_cost = 0.0;
+	}
 }
 
 /*

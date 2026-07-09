@@ -2063,6 +2063,16 @@ typedef struct IndexPath
 } IndexPath;
 
 /*
+ * FakeIndexPath is an IndexPath with artificially low planner cost.
+ *
+ * It produces an ordinary IndexScan or IndexOnlyScan plan.
+ */
+typedef struct FakeIndexPath
+{
+	IndexPath	indexpath;
+} FakeIndexPath;
+
+/*
  * Each IndexClause references a RestrictInfo node from the query's WHERE
  * or JOIN conditions, and shows how that restriction can be applied to
  * the particular index.  We support both indexclauses that are directly
