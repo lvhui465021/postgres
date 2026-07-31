@@ -28,6 +28,12 @@ SELECT extversion
 FROM pg_extension
 WHERE extname = 'aux_mysql';
 
+ALTER EXTENSION aux_mysql UPDATE TO '1.6';
+
+SELECT extversion
+FROM pg_extension
+WHERE extname = 'aux_mysql';
+
 SELECT mysql.uuid() IS NOT NULL AS uuid_generated;
 
 CREATE SEQUENCE aux_mysql_versioning_seq;

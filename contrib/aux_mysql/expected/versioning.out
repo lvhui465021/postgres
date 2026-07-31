@@ -43,6 +43,15 @@ WHERE extname = 'aux_mysql';
  1.5
 (1 row)
 
+ALTER EXTENSION aux_mysql UPDATE TO '1.6';
+SELECT extversion
+FROM pg_extension
+WHERE extname = 'aux_mysql';
+ extversion 
+------------
+ 1.6
+(1 row)
+
 SELECT mysql.uuid() IS NOT NULL AS uuid_generated;
  uuid_generated 
 ----------------

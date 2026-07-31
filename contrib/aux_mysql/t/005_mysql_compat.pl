@@ -75,6 +75,7 @@ $node->safe_psql('postgres', 'ALTER EXTENSION aux_mysql UPDATE TO "1.2"');
 $node->safe_psql('postgres', 'ALTER EXTENSION aux_mysql UPDATE TO "1.3"');
 $node->safe_psql('postgres', 'ALTER EXTENSION aux_mysql UPDATE TO "1.4"');
 $node->safe_psql('postgres', 'ALTER EXTENSION aux_mysql UPDATE TO "1.5"');
+$node->safe_psql('postgres', 'ALTER EXTENSION aux_mysql UPDATE TO "1.6"');
 $node->safe_psql(
     'postgres', q{
 SET password_encryption = 'mysql_native_password';
