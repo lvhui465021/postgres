@@ -714,6 +714,42 @@ RETURNS pg_catalog.varbit
 AS '$libdir/mysm', 'convertBigintToVarbit'
 LANGUAGE C STRICT IMMUTABLE;
 
+-- MySQL-compatible JSON functions.  These used to be registered in the
+-- kernel pg_proc.dat (json int2/int4/int8/float4/float8/numeric and
+-- mys_json_object); they now live in the mysm shared library.
+CREATE OR REPLACE FUNCTION mysql.json(pg_catalog.int2)
+RETURNS pg_catalog.json
+AS '$libdir/mysm', 'mys_to_json'
+LANGUAGE C STABLE STRICT;
+CREATE OR REPLACE FUNCTION mysql.json(pg_catalog.int4)
+RETURNS pg_catalog.json
+AS '$libdir/mysm', 'mys_to_json'
+LANGUAGE C STABLE STRICT;
+CREATE OR REPLACE FUNCTION mysql.json(pg_catalog.int8)
+RETURNS pg_catalog.json
+AS '$libdir/mysm', 'mys_to_json'
+LANGUAGE C STABLE STRICT;
+CREATE OR REPLACE FUNCTION mysql.json(pg_catalog.float4)
+RETURNS pg_catalog.json
+AS '$libdir/mysm', 'mys_to_json'
+LANGUAGE C STABLE STRICT;
+CREATE OR REPLACE FUNCTION mysql.json(pg_catalog.float8)
+RETURNS pg_catalog.json
+AS '$libdir/mysm', 'mys_to_json'
+LANGUAGE C STABLE STRICT;
+CREATE OR REPLACE FUNCTION mysql.json(pg_catalog.numeric)
+RETURNS pg_catalog.json
+AS '$libdir/mysm', 'mys_to_json'
+LANGUAGE C STABLE STRICT;
+CREATE OR REPLACE FUNCTION mysql.mys_json_object(VARIADIC "any")
+RETURNS pg_catalog.json
+AS '$libdir/mysm', 'mys_json_object'
+LANGUAGE C STABLE CALLED ON NULL INPUT;
+CREATE OR REPLACE FUNCTION mysql.mys_json_object()
+RETURNS pg_catalog.json
+AS '$libdir/mysm', 'mys_json_object_noargs'
+LANGUAGE C STABLE CALLED ON NULL INPUT;
+
 CREATE OR REPLACE FUNCTION mysql.cast_bigint_to_varbit(pg_catalog.int8)
 RETURNS pg_catalog.varbit
 AS

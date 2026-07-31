@@ -16,6 +16,7 @@ mysm_sources = files(
   'mysm_globals.c',
   'uuid_stubs.c',
   'mysm_stubs.c',
+  'mys_json.c',
 )
 mysm = shared_module('mysm',
   mysm_sources,
