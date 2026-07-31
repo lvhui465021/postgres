@@ -27,6 +27,24 @@ int database_compat_mode = POSTGRESQL_COMPAT_MODE;
 /* Parser Engine Instance */
 const ParserRoutine *parserengine = NULL;
 
+/* Dialect parser tables registered via RegisterParserRoutine(). */
+static const ParserRoutine *dialect_parser[COMPAT_PROTOCOL_KIND_MAX];
+
+/*
+ * RegisterParserRoutine
+ *
+ * Register (or replace) the ParserRoutine for a compatibility kind.  The
+ * kernel dispatches to it in InitParserEngine() by MyCompatMode; kinds
+ * without a registered table fall back to the standard PG parser.
+ */
+void
+RegisterParserRoutine(CompatibilityProtocolKind kind,
+					  const ParserRoutine *routine)
+{
+	Assert(kind >= 0 && kind < COMPAT_PROTOCOL_KIND_MAX);
+	dialect_parser[kind] = routine;
+}
+
 /*
  * MyCompatMode -- backend-level dialect context.
  *
@@ -48,6 +66,13 @@ CompatibilityProtocolKind MyCompatMode = COMPAT_PROTOCOL_POSTGRES;
 void
 InitCompatMode(void)
 {
+	/*
+	 * Register the built-in MySQL parser table on first use.  This is the
+	 * dynamic-registration seam that a loadable parser library would also
+	 * use; the kernel dispatches by MyCompatMode in InitParserEngine().
+	 */
+	RegisterParserRoutine(COMPAT_PROTOCOL_MYSQL, &MySQLParserRoutine);
+
 	if (MyProcPort != NULL)
 		MyCompatMode = MyProcPort->protocol_kind;
 	else
@@ -101,14 +126,8 @@ GetMySQLParserRoutine(void)
 void
 InitParserEngine(void)
 {
-	switch (MyCompatMode)
-	{
-		case COMPAT_PROTOCOL_MYSQL:
-			parserengine = GetMySQLParserRoutine();
-			break;
-
-		default:
-			parserengine = GetStandardParserRoutine();
-			break;
-	}
+	/* The MySQL table is registered at library load time (see below). */
+	parserengine = dialect_parser[MyCompatMode];
+	if (parserengine == NULL)
+		parserengine = GetStandardParserRoutine();
 }
