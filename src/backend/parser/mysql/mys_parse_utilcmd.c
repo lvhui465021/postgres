@@ -19,6 +19,7 @@
 #include "access/table.h"
 #include "access/toast_compression.h"
 #include "access/xact.h"
+#include "catalog/catalog.h"
 #include "catalog/dependency.h"
 #include "catalog/heap.h"
 #include "catalog/index.h"
@@ -48,8 +49,11 @@
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
+#include "nodes/parsenodes.h"
+#include "nodes/mysql/mys_parsenodes.h"
 #include "optimizer/optimizer.h"
 #include "parser/analyze.h"
+#include "parser/parse_node.h"
 #include "parser/parse_clause.h"
 #include "parser/parse_coerce.h"
 #include "parser/parse_collate.h"
@@ -5630,4 +5634,253 @@ transformPartitionCmd(CreateStmtContext *cxt, PartitionCmd *cmd)
 				 RelationGetRelationName(parentRel));
 			break;
 	}
+}
+
+static Query *transformMysSelectIntoStmt(ParseState *pstate, MysSelectIntoStmt *stmt);
+static List *resolve_unique_index_expr(ParseState *pstate, InferClause *infer,
+									   Relation heapRel);
+
+/*
+ * mys_transformOptionalSelectInto
+ *
+ * ParserRoutine.transformOptionalSelectInto implementation: handle MySQL
+ * SELECT ... INTO @var statements, lowering them to a CMD_UTILITY node.
+ * Anything else falls through to the standard transformStmt().
+ */
+Query *
+mys_transformOptionalSelectInto(ParseState *pstate, Node *parseTree)
+{
+	if (IsA(parseTree, SelectStmt))
+	{
+		SelectStmt *stmt = (SelectStmt *) parseTree;
+
+		/* INTO belongs to the leftmost leaf of a set-operation tree. */
+		while (stmt->op != SETOP_NONE)
+			stmt = stmt->larg;
+		Assert(stmt != NULL && stmt->larg == NULL);
+
+		if (stmt->intoClause != NULL)
+		{
+			MysSelectIntoStmt *into_stmt = makeNode(MysSelectIntoStmt);
+			ListCell   *lc;
+
+			/*
+			 * The MySQL grammar stores its INTO targets in colNames only to
+			 * reuse SelectStmt.  Do not pass that representation to the PG
+			 * SELECT INTO-to-CTAS path: it has no relation target.
+			 */
+			foreach(lc, stmt->intoClause->colNames)
+			{
+				if (!IsA(lfirst(lc), UserVarRef))
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("SELECT INTO target must be a user variable")));
+			}
+
+			into_stmt->selectStmt = parseTree;
+			into_stmt->intoTarget = (Node *) stmt->intoClause->colNames;
+			into_stmt->location = -1;
+			stmt->intoClause = NULL;
+
+			return transformMysSelectIntoStmt(pstate, into_stmt);
+		}
+	}
+
+	return transformStmt(pstate, parseTree);
+}
+
+/*
+ * transformMysSelectIntoStmt
+ *
+ * Build a CMD_UTILITY Query wrapping a MysSelectIntoStmt.
+ */
+static Query *
+transformMysSelectIntoStmt(ParseState *pstate, MysSelectIntoStmt *stmt)
+{
+	Query *result = makeNode(Query);
+	result->commandType = CMD_UTILITY;
+	result->utilityStmt = (Node *) stmt;
+	result->querySource = QSRC_ORIGINAL;
+	result->canSetTag = true;
+	return result;
+}
+
+/*
+ * mys_transformOnConflictArbiter
+ *
+ * ParserRoutine.transformOnConflictArbiter implementation: build the
+ * arbiter expression / WHERE clause for MySQL-style ON CONFLICT handling.
+ */
+void
+mys_transformOnConflictArbiter(ParseState *pstate,
+						   OnConflictClause *onConflictClause,
+						   List **arbiterExpr, Node **arbiterWhere,
+						   Oid *constraint)
+{
+	InferClause *infer = onConflictClause->infer;
+
+	*arbiterExpr = NIL;
+	*arbiterWhere = NULL;
+	*constraint = InvalidOid;
+
+	/*
+	 * To simplify certain aspects of its design, speculative insertion into
+	 * system catalogs is disallowed
+	 */
+	if (IsCatalogRelation(pstate->p_target_relation))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("ON CONFLICT is not supported with system catalog tables"),
+				 parser_errposition(pstate,
+									exprLocation((Node *) onConflictClause))));
+
+	/* Same applies to table used by logical decoding as catalog table */
+	if (RelationIsUsedAsCatalogTable(pstate->p_target_relation))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("ON CONFLICT is not supported on table \"%s\" used as a catalog table",
+						RelationGetRelationName(pstate->p_target_relation)),
+				 parser_errposition(pstate,
+									exprLocation((Node *) onConflictClause))));
+
+	/* ON CONFLICT DO NOTHING does not require an inference clause */
+	if (infer)
+	{
+		if (infer->indexElems)
+			*arbiterExpr = resolve_unique_index_expr(pstate, infer,
+													 pstate->p_target_relation);
+
+		/*
+		 * Handling inference WHERE clause (for partial unique index
+		 * inference)
+		 */
+		if (infer->whereClause)
+			*arbiterWhere = transformExpr(pstate, infer->whereClause,
+										  EXPR_KIND_INDEX_PREDICATE);
+
+		/*
+		 * If the arbiter is specified by constraint name, get the constraint
+		 * OID and mark the constrained columns as requiring SELECT privilege,
+		 * in the same way as would have happened if the arbiter had been
+		 * specified by explicit reference to the constraint's index columns.
+		 */
+		if (infer->conname)
+		{
+			Oid			relid = RelationGetRelid(pstate->p_target_relation);
+			RTEPermissionInfo *perminfo = pstate->p_target_nsitem->p_perminfo;
+			Bitmapset  *conattnos;
+
+			conattnos = get_relation_constraint_attnos(relid, infer->conname,
+													   false, constraint);
+
+			/* Make sure the rel as a whole is marked for SELECT access */
+			perminfo->requiredPerms |= ACL_SELECT;
+			/* Mark the constrained columns as requiring SELECT access */
+			perminfo->selectedCols = bms_add_members(perminfo->selectedCols,
+													 conattnos);
+		}
+	}
+
+	/*
+	 * It's convenient to form a list of expressions based on the
+	 * representation used by CREATE INDEX, since the same restrictions are
+	 * appropriate (e.g. on subqueries).  However, from here on, a dedicated
+	 * primnode representation is used for inference elements, and so
+	 * assign_query_collations() can be trusted to do the right thing with the
+	 * post parse analysis query tree inference clause representation.
+	 */
+}
+
+/*
+ * resolve_unique_index_expr
+ *
+ * Transform the ON CONFLICT inference index elements into an inference
+ * expression list.
+ */
+static List *
+resolve_unique_index_expr(ParseState *pstate, InferClause *infer,
+						  Relation heapRel)
+{
+	List	   *result = NIL;
+	ListCell   *l;
+
+	foreach(l, infer->indexElems)
+	{
+		IndexElem  *ielem = (IndexElem *) lfirst(l);
+		InferenceElem *pInfer = makeNode(InferenceElem);
+		Node	   *parse;
+
+		/*
+		 * Raw grammar re-uses CREATE INDEX infrastructure for unique index
+		 * inference clause, and so will accept opclasses by name and so on.
+		 *
+		 * Make no attempt to match ASC or DESC ordering or NULLS FIRST/NULLS
+		 * LAST ordering, since those are not significant for inference
+		 * purposes (any unique index matching the inference specification in
+		 * other regards is accepted indifferently).  Actively reject this as
+		 * wrong-headed.
+		 */
+		if (ielem->ordering != SORTBY_DEFAULT)
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
+					 errmsg("ASC/DESC is not allowed in ON CONFLICT clause"),
+					 parser_errposition(pstate,
+										exprLocation((Node *) infer))));
+		if (ielem->nulls_ordering != SORTBY_NULLS_DEFAULT)
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
+					 errmsg("NULLS FIRST/LAST is not allowed in ON CONFLICT clause"),
+					 parser_errposition(pstate,
+										exprLocation((Node *) infer))));
+
+		if (!ielem->expr)
+		{
+			/* Simple index attribute */
+			ColumnRef  *n;
+
+			/*
+			 * Grammar won't have built raw expression for us in event of
+			 * plain column reference.  Create one directly, and perform
+			 * expression transformation.  Planner expects this, and performs
+			 * its own normalization for the purposes of matching against
+			 * pg_index.
+			 */
+			n = makeNode(ColumnRef);
+			n->fields = list_make1(makeString(ielem->name));
+			/* Location is approximately that of inference specification */
+			n->location = infer->location;
+			parse = (Node *) n;
+		}
+		else
+		{
+			/* Do parse transformation of the raw expression */
+			parse = (Node *) ielem->expr;
+		}
+
+		/*
+		 * transformExpr() will reject subqueries, aggregates, window
+		 * functions, and SRFs, based on being passed
+		 * EXPR_KIND_INDEX_EXPRESSION.  So we needn't worry about those
+		 * further ... not that they would match any available index
+		 * expression anyway.
+		 */
+		pInfer->expr = transformExpr(pstate, parse, EXPR_KIND_INDEX_EXPRESSION);
+
+		/* Perform lookup of collation and operator class as required */
+		if (!ielem->collation)
+			pInfer->infercollid = InvalidOid;
+		else
+			pInfer->infercollid = LookupCollation(pstate, ielem->collation,
+												  exprLocation(pInfer->expr));
+
+		if (!ielem->opclass)
+			pInfer->inferopclass = InvalidOid;
+		else
+			pInfer->inferopclass = get_opclass_oid(BTREE_AM_OID,
+												   ielem->opclass, false);
+
+		result = lappend(result, pInfer);
+	}
+
+	return result;
 }

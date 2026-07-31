@@ -61,7 +61,15 @@ extern AlterObjectDependsStmt *bindTriggerToSeq(RangeVar *relation,
 extern AlterObjectDependsStmt *bindTriggerToColumn(RangeVar *relation, 
                                                    char *trigName, 
                                                    char *colName);
-extern bool existAutoUpdateTrigOnThisAtt(Relation relation, 
+extern bool existAutoUpdateTrigOnThisAtt(Relation relation,
                                          FormData_pg_attribute *att);
+
+/* ParserRoutine callbacks (lowered MySQL SELECT INTO / ON CONFLICT). */
+extern Query *mys_transformOptionalSelectInto(ParseState *pstate, Node *parseTree);
+extern void mys_transformOnConflictArbiter(ParseState *pstate,
+										   OnConflictClause *onConflictClause,
+										   List **arbiterExpr,
+										   Node **arbiterWhere,
+										   Oid *constraint);
 
 #endif							/* MYS_PARSE_UTILCMD_H */
