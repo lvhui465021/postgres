@@ -3,6 +3,11 @@
  * mys_adtext.h
  *    MySQL ADT compatibility: ADT extension method declarations.
  *
+ * The MySQL ADT method table is registered with the kernel via
+ * RegisterADTExt() in mys_adtext.c's _PG_init; this header exists to
+ * document the module boundary.  The table itself is defined in the
+ * module, not exposed to the kernel.
+ *
  * Portions Copyright (c) 2026, HaloLab / openHalo Contributors
  *
  * src/include/utils/mysql/mys_adtext.h
@@ -15,11 +20,7 @@
 
 #include "utils/adtextapi.h"
 
-/*
- * ADT Extra for Oracle Compatible
- */
-extern const ADTExtMethod *GetMysADTExt(void);
-
+/* Register the MySQL ADT method table (called at backend startup). */
+extern void InitMysADTExt(void);
 
 #endif							/* MYS_ADTEXT_H */
-

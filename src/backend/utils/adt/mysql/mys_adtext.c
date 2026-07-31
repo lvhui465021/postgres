@@ -11,13 +11,10 @@
  */
 #include "postgres.h"
 
-
+#include "utils/adtext.h"
 #include "utils/mysql/mys_adtext.h"
 #include "utils/mysql/mys_date.h"
 #include "utils/mysql/mys_timestamp.h"
-
-
-static const ADTExtMethod mys_adtext;
 
 
 static const ADTExtMethod mys_adtext = {
@@ -34,8 +31,16 @@ static const ADTExtMethod mys_adtext = {
 	.allow_zero_length_char_typmod = true
 };
 
-const ADTExtMethod *
-GetMysADTExt(void)
+/*
+ * InitMysADTExt
+ *
+ * Register the MySQL ADT method table with the kernel so that MySQL-mode
+ * backends dispatch to it.  Called during backend startup (and from the
+ * module's _PG_init once the type layer is externalized to a loadable
+ * library).
+ */
+void
+InitMysADTExt(void)
 {
-    return &mys_adtext;
+	RegisterADTExt(COMPAT_PROTOCOL_MYSQL, &mys_adtext);
 }

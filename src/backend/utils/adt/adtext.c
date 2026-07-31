@@ -17,7 +17,6 @@
 
 #include "parser/parsereng.h"
 #include "utils/adtext.h"
-#include "utils/mysql/mys_adtext.h"
 
 #include "miscadmin.h"
 #include "libpq/libpq-be.h"
@@ -27,6 +26,9 @@ void InitADTExt(void);
 const ADTExtMethod *adtext = NULL;
 
 static const ADTExtMethod standard_adtext;
+
+/* Dialect ADT tables registered via RegisterADTExt(). */
+static const ADTExtMethod *dialect_adtext[COMPAT_PROTOCOL_KIND_MAX];
 
 
 /*
@@ -55,24 +57,41 @@ GetStandardADTExt(void)
 
 
 /*
+ * RegisterADTExt / UnregisterADTExt
+ *
+ * Register (or unregister) a dialect's ADT method table.  The MySQL
+ * compatibility module registers its table during _PG_init; the kernel
+ * dispatches to it by compatibility kind and otherwise uses the standard
+ * pass-through table.  Keeping the table in a module -- rather than the
+ * kernel statically referencing it -- lets the type layer ship as a
+ * loadable library.
+ */
+void
+RegisterADTExt(CompatibilityProtocolKind kind, const ADTExtMethod *table)
+{
+	Assert(kind >= 0 && kind < COMPAT_PROTOCOL_KIND_MAX);
+	dialect_adtext[kind] = table;
+}
+
+void
+UnregisterADTExt(CompatibilityProtocolKind kind)
+{
+	Assert(kind >= 0 && kind < COMPAT_PROTOCOL_KIND_MAX);
+	dialect_adtext[kind] = NULL;
+}
+
+
+/*
  * InitADTExt
  *
  * Selects the ADT extension table based on the backend's dialect context
- * (MyCompatMode).  The MySQL-specific ADT functions (mys_date_in,
- * mys_timestamp_in, etc.) are installed for MySQL-mode backends;
+ * (MyCompatMode).  The dialect's registered table is used when one exists;
  * otherwise the standard pass-through table is used.
  */
 void
 InitADTExt(void)
 {
-	switch (MyCompatMode)
-	{
-		case COMPAT_PROTOCOL_MYSQL:
-			adtext = GetMysADTExt();
-			break;
-
-		default:
-			adtext = GetStandardADTExt();
-			break;
-	}
+	adtext = dialect_adtext[MyCompatMode];
+	if (adtext == NULL)
+		adtext = GetStandardADTExt();
 }
