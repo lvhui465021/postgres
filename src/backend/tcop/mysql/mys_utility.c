@@ -1934,6 +1934,46 @@ MysSqlModeAssignmentValue(Node *arg)
 	bool		is_session = true;
 	char	   *value = NULL;
 
+	if (IsA(arg, FuncCall))
+	{
+		/*
+		 * @@session.sql_mode is degraded to
+		 * pg_catalog.mys_get_system_variable('session.sql_mode', bool).
+		 * Recover the variable name from the call and resolve its value.
+		 */
+		FuncCall   *fn = (FuncCall *) arg;
+		A_Const    *name_arg;
+
+		if (list_length(fn->funcname) == 2 &&
+			pg_strcasecmp(strVal(linitial(fn->funcname)), "pg_catalog") == 0 &&
+			pg_strcasecmp(strVal(lsecond(fn->funcname)),
+						  "mys_get_system_variable") == 0 &&
+			list_length(fn->args) >= 1 && IsA(linitial(fn->args), A_Const))
+		{
+			name_arg = (A_Const *) linitial(fn->args);
+			if (!name_arg->isnull && name_arg->val.node.type == T_String)
+			{
+				name = name_arg->val.sval.sval;
+				if (pg_strncasecmp(name, "session.", 8) == 0)
+					name += 8;
+				else if (pg_strncasecmp(name, "local.", 6) == 0)
+					name += 6;
+				else if (pg_strncasecmp(name, "global.", 7) == 0)
+				{
+					name += 7;
+					is_session = false;
+				}
+
+				if (pg_strcasecmp(name, "sql_mode") == 0)
+				{
+					getSystemVariableValueForSelect(pstrdup(name), is_session, &value);
+					return value;
+				}
+			}
+		}
+		return NULL;
+	}
+
 	if (!IsA(arg, SysVarRef))
 		return MysStringAssignmentValue(arg);
 

@@ -21,6 +21,7 @@
 #include "utils/builtins.h"
 #include "commands/mysql/mys_uservar.h"
 #include "utils/builtins.h"
+#include "utils/guc.h"
 #include "utils/hsearch.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
@@ -100,9 +101,81 @@ mys_get_system_variable(PG_FUNCTION_ARGS)
 	char	   *name = text_to_cstring(PG_GETARG_TEXT_PP(0));
 	bool		is_session = PG_GETARG_BOOL(1);
 	char	   *value = NULL;
+	char	   *static_value = NULL;
 
-	getSystemVariableValueForSelect(name, is_session, &value);
-	pfree(name);
+	/*
+	 * Compatibility probes with fixed literal results resolve without the
+	 * catalog/session machinery (which requires the aux_mysql extension's
+	 * mys_informa_schema).  This mirrors the literal folding the dialect
+	 * parser used to do for these names before they were degraded to this
+	 * function call.
+	 */
+	if (pg_strcasecmp(name, "autocommit") == 0 ||
+		pg_strcasecmp(name, "session.autocommit") == 0 ||
+		pg_strcasecmp(name, "local.autocommit") == 0)
+		static_value = MysAutocommitEnabled() ? "1" : "0";
+	else if (pg_strcasecmp(name, "character_set_client") == 0 ||
+			 pg_strcasecmp(name, "character_set_connection") == 0 ||
+			 pg_strcasecmp(name, "character_set_results") == 0 ||
+			 pg_strcasecmp(name, "character_set_server") == 0)
+		static_value = "utf8mb4";
+	else if (pg_strcasecmp(name, "collation_connection") == 0 ||
+			 pg_strcasecmp(name, "session.collation_connection") == 0 ||
+			 pg_strcasecmp(name, "collation_server") == 0 ||
+			 pg_strcasecmp(name, "collation_database") == 0)
+		static_value = "utf8mb4_general_ci";
+	else if (pg_strcasecmp(name, "max_allowed_packet") == 0)
+		static_value = "16777216";
+	else if (pg_strcasecmp(name, "version_comment") == 0 ||
+			 pg_strcasecmp(name, "version") == 0)
+		static_value = mysql_server_version;
+
+	if (static_value != NULL)
+	{
+		pfree(name);
+		PG_RETURN_TEXT_P(cstring_to_text(static_value));
+	}
+
+	/*
+	 * Session/global time zone resolve through session state rather than
+	 * the extension catalog, so they work in a bare kernel (e.g. the wire
+	 * protocol tests before aux_mysql is created).
+	 */
+	if (pg_strcasecmp(name, "time_zone") == 0 ||
+		pg_strcasecmp(name, "session.time_zone") == 0 ||
+		pg_strcasecmp(name, "local.time_zone") == 0)
+	{
+		pfree(name);
+		PG_RETURN_TEXT_P(cstring_to_text(MysGetSessionTimeZone()));
+	}
+	if (pg_strcasecmp(name, "global.time_zone") == 0)
+	{
+		char	   *tz = MysGetGlobalTimeZone();
+
+		pfree(name);
+		PG_RETURN_TEXT_P(cstring_to_text(tz));
+	}
+
+	/*
+	 * Strip the session./local./global. prefix before resolving the value;
+	 * getSystemVariableValueForSelect expects the bare variable name.
+	 */
+	{
+		char	   *orig_name = name;
+
+		if (pg_strncasecmp(name, "session.", 8) == 0)
+			name += 8;
+		else if (pg_strncasecmp(name, "local.", 6) == 0)
+			name += 6;
+		else if (pg_strncasecmp(name, "global.", 7) == 0)
+		{
+			name += 7;
+			is_session = false;
+		}
+
+		getSystemVariableValueForSelect(name, is_session, &value);
+		pfree(orig_name);
+	}
 	if (value == NULL)
 		PG_RETURN_NULL();
 	PG_RETURN_TEXT_P(cstring_to_text(value));

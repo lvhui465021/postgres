@@ -127,7 +127,7 @@ user_variables	1
 SELECT @mysql_compat_number := @mysql_compat_number + 1
 --------------
 
-?column?
+@mysql_compat_number
 43
 1 row in set
 

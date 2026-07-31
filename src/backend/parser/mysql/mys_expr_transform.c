@@ -69,6 +69,7 @@ mys_figure_colname(Node *expr)
 		{
 			fname = strVal(lsecond(fn->funcname));
 			if ((pg_strcasecmp(fname, "mys_get_user_var") == 0 ||
+				 pg_strcasecmp(fname, "mys_set_user_var") == 0 ||
 				 pg_strcasecmp(fname, "mys_get_system_variable") == 0) &&
 				list_length(fn->args) >= 1 &&
 				IsA(linitial(fn->args), A_Const))
@@ -76,8 +77,8 @@ mys_figure_colname(Node *expr)
 				arg = (A_Const *) linitial(fn->args);
 				if (!arg->isnull && arg->val.node.type == T_String)
 					return psprintf("%s%s",
-									pg_strcasecmp(fname, "mys_get_user_var") == 0 ?
-									"@" : "@@",
+									pg_strcasecmp(fname, "mys_get_system_variable") == 0 ?
+									"@@" : "@",
 									arg->val.sval.sval);
 			}
 		}
@@ -166,8 +167,10 @@ mys_transform_expr_node(ParseState *pstate, Node *expr, Node **result)
 			/*
 			 * The grammar lowers @name to pg_catalog.mys_get_user_var('name').
 			 * Coerce the text result to the stored variable type so that
-			 * arithmetic on an integer user variable resolves to the numeric
-			 * operator (e.g. SELECT @n + 1 with SET @n := 5).
+			 * arithmetic/comparisons on a numeric user variable resolve to
+			 * the native operator (e.g. SET @n := 5; SELECT @n + 1).  The
+			 * FuncCall is transformed first, then wrapped in an explicit
+			 * cast to the stored type.
 			 */
 			if (list_length(fn->funcname) == 2 &&
 				pg_strcasecmp(strVal(linitial(fn->funcname)), "pg_catalog") == 0 &&
@@ -176,6 +179,7 @@ mys_transform_expr_node(ParseState *pstate, Node *expr, Node **result)
 			{
 				A_Const    *name_const = (A_Const *) linitial(fn->args);
 				Oid			valueType;
+				Node	   *transformed;
 				Node	   *coerced;
 
 				if (!name_const->isnull &&
@@ -183,8 +187,20 @@ mys_transform_expr_node(ParseState *pstate, Node *expr, Node **result)
 					OidIsValid(valueType = mysGetUserVarTypeInternal(
 								   name_const->val.sval.sval)))
 				{
-					coerced = coerce_to_target_type(pstate, (Node *) fn,
-													TEXTOID,
+					/*
+					 * Transform the mys_get_user_var call without re-entering
+					 * this hook (the degraded FuncCall would recurse), then
+					 * cast the text result to the stored variable type.
+					 */
+					const ParserRoutine *save_routine = pstate->p_parser_routine;
+
+					pstate->p_parser_routine = NULL;
+					transformed = transformExpr(pstate, (Node *) fn,
+												pstate->p_expr_kind);
+					pstate->p_parser_routine = save_routine;
+
+					coerced = coerce_to_target_type(pstate, transformed,
+													exprType(transformed),
 													getBaseType(valueType), -1,
 													COERCION_EXPLICIT,
 													COERCE_EXPLICIT_CAST,
