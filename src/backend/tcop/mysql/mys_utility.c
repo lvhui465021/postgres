@@ -2289,14 +2289,17 @@ MysExecSelectIntoStmt(ParseState *pstate, MysSelectIntoStmt *parsetree, ParamLis
 
         for (i = 0; i < list_length(targets); i++)
         {
-            UserVarRef *userVar = (UserVarRef *) lfirst(list_nth_cell(targets, i));
+            char *userVarName = mys_extract_user_var_name(
+                (Node *) lfirst(list_nth_cell(targets, i)));
             Oid valTypeOid = TupleDescAttr(queryDesc->tupDesc, i)->atttypid;
             Datum value;
             bool isNull;
 
+            if (userVarName == NULL)
+                elog(ERROR, "SELECT INTO target is not a user variable");
             value = slot_getattr(slot, i + 1, &isNull);
 
-            mysSetUserVarForPl(userVar->userVarName, value, valTypeOid, isNull);
+            mysSetUserVarForPl(userVarName, value, valTypeOid, isNull);
         }
 
         ExecDropSingleTupleTableSlot(slot);

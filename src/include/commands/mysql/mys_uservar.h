@@ -16,6 +16,7 @@
 #ifndef MYS_USERVAR_H
 #define MYS_USERVAR_H
 
+#include "nodes/nodes.h"
 #include "postgres.h"
 
 void clearUserVars(void);
@@ -24,5 +25,8 @@ void mysSetUserVarInternal(char *userVarName, char *userVarValue, Oid varValueTy
 void mysSetUserVarForPl(char *userVarName, Datum userVarValue, Oid varValueType, bool isNull);
 bytea *mysGetUserVarValueInternal(char *userVarName);
 Oid mysGetUserVarTypeInternal(char *userVarName);
+
+/* Recover the variable name from a degraded pg_catalog.mys_get_user_var call. */
+extern char *mys_extract_user_var_name(Node *expr);
 
 #endif                          /* MYS_USERVAR_H */

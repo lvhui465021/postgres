@@ -14670,12 +14670,11 @@ PreparableStmt:
                 }
             | MysqlUserVariableName
                 {
-                    UserVarRef *n = makeNode(UserVarRef);
-
-                    n->userVarName = $1;
-                    n->location = @1;
-
-                    $$ = (Node *)n;
+                    $$ = (Node *) makeFuncCall(
+                        list_make2(makeString(pstrdup("pg_catalog")),
+                                   makeString(pstrdup("mys_get_user_var"))),
+                        list_make1(mys_makeStringConst($1, @1)),
+                        COERCE_EXPLICIT_CALL, @1);
                 }
 		;
 
@@ -16629,12 +16628,11 @@ select_var_list:
 select_var:
             MysqlUserVariableName
                 {
-                    UserVarRef *n = makeNode(UserVarRef);
-
-                    n->userVarName = $1;
-                    n->location = @1;
-
-                    $$ = (Node *)n;
+                    $$ = (Node *) makeFuncCall(
+                        list_make2(makeString(pstrdup("pg_catalog")),
+                                   makeString(pstrdup("mys_get_user_var"))),
+                        list_make1(mys_makeStringConst($1, @1)),
+                        COERCE_EXPLICIT_CALL, @1);
                 }
             | IDENT
                 {
@@ -19825,31 +19823,52 @@ c_expr:		columnref								{ $$ = $1; }
 			| AexprConst							{ $$ = $1; }
             | MysqlUserVariableName
                 {
-                    UserVarRef *n = makeNode(UserVarRef);
-
-                    n->userVarName = $1;
-                    n->location = @1;
-
-                    $$ = (Node *)n;
+                    /*
+                     * @name degrades to pg_catalog.mys_get_user_var(name).
+                     * The pg_catalog qualification resolves without relying
+                     * on search_path, which bison actions cannot do.  The
+                     * dialect transform hook recognizes this FuncCall and
+                     * re-applies stored-type coercion.
+                     */
+                    $$ = (Node *) makeFuncCall(
+                        list_make2(makeString(pstrdup("pg_catalog")),
+                                   makeString(pstrdup("mys_get_user_var"))),
+                        list_make1(mys_makeStringConst($1, @1)),
+                        COERCE_EXPLICIT_CALL, @1);
                 }
             | MysqlUserVariableName COLON_EQUALS a_expr
                 {
-					UserVarAssign *n = makeNode(UserVarAssign);
+                    /*
+                     * @name := expr degrades to pg_catalog.mys_set_user_var.
+                     * The polymorphic value parameter needs a concrete type;
+                     * MySQL string and NULL literals are "unknown" here.
+                     */
+                    Node *value = $3;
 
-                    n->userVarName = $1;
-					n->expr = $3;
-                    n->location = @1;
+                    if (IsA(value, A_Const) &&
+                        (castNode(A_Const, value)->isnull ||
+                         castNode(A_Const, value)->val.node.type == T_String))
+                        value = mys_makeTypeCast(value, SystemTypeName("text"), -1);
 
-                    $$ = (Node *)n;
+                    $$ = (Node *) makeFuncCall(
+                        list_make2(makeString(pstrdup("pg_catalog")),
+                                   makeString(pstrdup("mys_set_user_var"))),
+                        list_make2(mys_makeStringConst($1, @1), value),
+                        COERCE_EXPLICIT_CALL, @1);
                 }
             | MysSysVarName
                 {
-                    SysVarRef *n = makeNode(SysVarRef);
-                    n->sysVarName = $1;
-                    n->location = @1;
-                    $$ = (Node *) n;
-                    n->location = @1;
-                    $$ = (Node *) n;
+                    /*
+                     * @@name degrades to pg_catalog.mys_get_system_variable.
+                     * The dialect transform hook recognizes this FuncCall and
+                     * applies the per-name session/global logic.
+                     */
+                    $$ = (Node *) makeFuncCall(
+                        list_make2(makeString(pstrdup("pg_catalog")),
+                                   makeString(pstrdup("mys_get_system_variable"))),
+                        list_make2(mys_makeStringConst($1, @1),
+                                   mys_makeStringConst(pstrdup("true"), @1)),
+                        COERCE_EXPLICIT_CALL, @1);
                 }
 			| PARAM opt_indirection
 				{

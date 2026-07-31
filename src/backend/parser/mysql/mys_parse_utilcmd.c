@@ -42,6 +42,7 @@
 #include "commands/defrem.h"
 #include "commands/mysql/mys_set.h"
 #include "commands/mysql/mys_tablecmds.h"
+#include "commands/mysql/mys_uservar.h"
 #include "commands/sequence.h"
 #include "commands/tablecmds.h"
 #include "commands/tablespace.h"
@@ -5671,7 +5672,7 @@ mys_transformOptionalSelectInto(ParseState *pstate, Node *parseTree)
 			 */
 			foreach(lc, stmt->intoClause->colNames)
 			{
-				if (!IsA(lfirst(lc), UserVarRef))
+				if (mys_extract_user_var_name((Node *) lfirst(lc)) == NULL)
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							 errmsg("SELECT INTO target must be a user variable")));

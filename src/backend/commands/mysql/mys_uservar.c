@@ -534,3 +534,43 @@ copyUserVarValue(bytea *varValue)
 
     return result;
 }
+
+/*
+ * mys_extract_user_var_name
+ *
+ * Extract the variable name from a degraded MySQL user-variable reference.
+ * The grammar now emits pg_catalog.mys_get_user_var('name') FuncCall nodes
+ * instead of a dedicated UserVarRef node; callers that previously read
+ * UserVarRef.userVarName use this to recover the name.
+ *
+ * Returns a pstrdup'd name, or NULL if expr is not such a call.
+ */
+char *
+mys_extract_user_var_name(Node *expr)
+{
+	FuncCall   *fn;
+	A_Const    *arg;
+	char	   *fname;
+
+	if (expr == NULL || !IsA(expr, FuncCall))
+		return NULL;
+	fn = (FuncCall *) expr;
+
+	/* Two-part name pg_catalog.mys_get_user_var. */
+	if (list_length(fn->funcname) != 2)
+		return NULL;
+	if (pg_strcasecmp(strVal(linitial(fn->funcname)), "pg_catalog") != 0)
+		return NULL;
+	fname = strVal(lsecond(fn->funcname));
+	if (pg_strcasecmp(fname, "mys_get_user_var") != 0)
+		return NULL;
+
+	/* Single text argument holding the variable name. */
+	if (list_length(fn->args) != 1)
+		return NULL;
+	arg = linitial_node(A_Const, fn->args);
+	if (arg->isnull || arg->val.node.type != T_String)
+		return NULL;
+
+	return pstrdup(arg->val.sval.sval);
+}

@@ -68,35 +68,39 @@ mys_PrepareQuery(ParseState *pstate, PrepareStmt *stmt,
     {
 		prepareStmt = strVal(stmt->query);
     }
-    else if (nodeTag(stmt->query) == T_UserVarRef)
+    else
     {
-        char *userVarName = ((UserVarRef *)(stmt->query))->userVarName;
-        bytea *userVarValue = mysGetUserVarValueInternal(userVarName);
+        char *userVarName = mys_extract_user_var_name(stmt->query);
 
-        if (userVarValue != NULL)
+        if (userVarName != NULL)
         {
-            char *byte = VARDATA_ANY(userVarValue);
-            size_t byteLen = VARSIZE_ANY_EXHDR(userVarValue);
+            bytea *userVarValue = mysGetUserVarValueInternal(userVarName);
 
-            prepareStmt = pnstrdup(byte, byteLen);
-
-            if (pg_verifymbstr(byte, byteLen, true))
+            if (userVarValue != NULL)
             {
-                /* Nothing to do */
+                char *byte = VARDATA_ANY(userVarValue);
+                size_t byteLen = VARSIZE_ANY_EXHDR(userVarValue);
+
+                prepareStmt = pnstrdup(byte, byteLen);
+
+                if (pg_verifymbstr(byte, byteLen, true))
+                {
+                    /* Nothing to do */
+                }
+                else
+                {
+                    elog(ERROR, "user variable %s is not a string literal", userVarName);
+                }
             }
             else
             {
-                elog(ERROR, "user variable %s is not a string literal", userVarName);
+                elog(ERROR, "user variable %s is NULL", userVarName);
             }
         }
         else
         {
-            elog(ERROR, "user variable %s is NULL", userVarName);
+            elog(ERROR, "unrecognized PREPARE source");
         }
-    }
-    else
-    {
-        /* mys_gram.y保证不会到这里 */
     }
 
 	/*

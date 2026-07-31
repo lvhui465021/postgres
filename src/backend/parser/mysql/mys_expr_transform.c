@@ -117,11 +117,36 @@ mys_figure_colname(Node *expr)
 		}
 	}
 
-	if (IsA(expr, UserVarRef))
-		return psprintf("@%s", ((UserVarRef *) expr)->userVarName);
+	/*
+	 * Degraded user/system variable references are FuncCall nodes:
+	 * pg_catalog.mys_get_user_var('name') and
+	 * pg_catalog.mys_get_system_variable('name', bool).  Restore the
+	 * MySQL @name / @@name result-column labels.
+	 */
+	if (IsA(expr, FuncCall))
+	{
+		FuncCall   *fn = (FuncCall *) expr;
+		A_Const    *arg;
+		char	   *fname;
 
-	if (IsA(expr, SysVarRef))
-		return psprintf("@@%s", ((SysVarRef *) expr)->sysVarName);
+		if (list_length(fn->funcname) == 2 &&
+			pg_strcasecmp(strVal(linitial(fn->funcname)), "pg_catalog") == 0)
+		{
+			fname = strVal(lsecond(fn->funcname));
+			if ((pg_strcasecmp(fname, "mys_get_user_var") == 0 ||
+				 pg_strcasecmp(fname, "mys_get_system_variable") == 0) &&
+				list_length(fn->args) >= 1 &&
+				IsA(linitial(fn->args), A_Const))
+			{
+				arg = (A_Const *) linitial(fn->args);
+				if (!arg->isnull && arg->val.node.type == T_String)
+					return psprintf("%s%s",
+									pg_strcasecmp(fname, "mys_get_user_var") == 0 ?
+									"@" : "@@",
+									arg->val.sval.sval);
+			}
+		}
+	}
 
 	return NULL;
 }
