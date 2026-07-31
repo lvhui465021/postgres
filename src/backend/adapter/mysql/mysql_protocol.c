@@ -17,6 +17,7 @@
 
 #include "access/printtup.h"
 #include "access/relation.h"
+#include "commands/mysql/mys_tablecmds.h"
 #include "commands/sequence.h"
 #include "access/xact.h"
 #include "adapter/mysql/mysql_auth.h"
@@ -1470,6 +1471,9 @@ void
 InitMySQLProtocolRoutine(void)
 {
     RegisterProtocolRoutine(&MySQLProtocolRoutine);
+
+    /* Register MySQL's CTAS post-hook so backends inherit it. */
+    InitMysCtasHook();
 }
 
 /* ----------------------------------------------------------------

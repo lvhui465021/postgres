@@ -1262,6 +1262,9 @@ InitPostgres(const char *in_dbname, Oid dboid,
 	/* Initialize this backend's session state. */
 	InitializeSession();
 
+	/* Resolve backend dialect (protocol override or cluster default) */
+	InitCompatMode();
+
 	/* Initialize Parser Engine (selects PG or MySQL parser per compat mode) */
 	InitParserEngine();
 

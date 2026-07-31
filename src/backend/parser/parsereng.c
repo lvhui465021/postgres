@@ -14,8 +14,7 @@
 #include "parser/parser.h"            /* raw_parser, RawParseMode    */
 #include "parser/parserapi.h"         /* ParserRoutine               */
 #include "parser/parsereng.h"
-#include "parser/mysql/mys_analyze.h"
-#include "parser/mysql/mys_parse_clause.h"
+#include "parser/mysql/mys_parse_utilcmd.h"
 #include "parser/mysql/mys_parser.h"  /* mys_raw_parser              */
 #include "parser/mysql/mys_expr_transform.h"  /* mys_transform_expr_node */
 
@@ -27,6 +26,34 @@ int database_compat_mode = POSTGRESQL_COMPAT_MODE;
 
 /* Parser Engine Instance */
 const ParserRoutine *parserengine = NULL;
+
+/*
+ * MyCompatMode -- backend-level dialect context.
+ *
+ * Defaults to the cluster-wide database_compat_mode, overridden by the
+ * active wire protocol on frontend connections, and propagated into
+ * parallel workers.  Unlike MyProcPort->protocol_kind, this value is
+ * always defined, even in processes with no client port (parallel
+ * workers, background workers, logical-replication apply workers).
+ */
+CompatibilityProtocolKind MyCompatMode = COMPAT_PROTOCOL_POSTGRES;
+
+/*
+ * InitCompatMode
+ *
+ * Resolves the backend's dialect before the parser engine and ADT
+ * extension are initialized.  Frontend connections adopt the protocol
+ * override; every other process falls back to the cluster default.
+ */
+void
+InitCompatMode(void)
+{
+	if (MyProcPort != NULL)
+		MyCompatMode = MyProcPort->protocol_kind;
+	else
+		MyCompatMode = (database_compat_mode == MYSQL_COMPAT_MODE) ?
+			COMPAT_PROTOCOL_MYSQL : COMPAT_PROTOCOL_POSTGRES;
+}
 
 /* ----------------------------------------------------------------
  *    StandardParserRoutine  –  PG dialect
@@ -67,33 +94,17 @@ GetMySQLParserRoutine(void)
 /*
  * InitParserEngine
  *
- * Selects the parser engine based on database_compat_mode.
- * When running in MYSQL_COMPAT_MODE with an active MySQL protocol,
- * the MySQL parser engine is installed; otherwise the standard
- * PostgreSQL parser is used.  The switch is extensible: additional
- * compat modes (Oracle, Sybase, etc.) can add their own cases.
+ * Selects the parser engine based on the backend's dialect context
+ * (MyCompatMode).  The switch is extensible: additional compat modes
+ * (Oracle, Sybase, etc.) can add their own cases.
  */
 void
 InitParserEngine(void)
 {
-	switch (database_compat_mode)
+	switch (MyCompatMode)
 	{
-		case POSTGRESQL_COMPAT_MODE:
-			parserengine = GetStandardParserRoutine();
-			break;
-
-		case MYSQL_COMPAT_MODE:
-
-			if ((MyProcPort != NULL) &&
-				(MyProcPort->protocol_kind == COMPAT_PROTOCOL_MYSQL))
-			{
-				parserengine = GetMySQLParserRoutine();
-			}
-			else
-			{
-				parserengine = GetStandardParserRoutine();
-			}
-
+		case COMPAT_PROTOCOL_MYSQL:
+			parserengine = GetMySQLParserRoutine();
 			break;
 
 		default:

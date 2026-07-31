@@ -46,4 +46,7 @@ Oid getColumnDefaultSeq(Relation rel, const char *colName);
 char *mysBuildPartitionTableName(char *tableName, char *pTableName);
 void mysSetColumnDefaultKind(Oid relid, AttrNumber attnum, char kind);
 
+/* Register the CTAS post-hook used for MySQL ON UPDATE trigger inheritance. */
+extern void InitMysCtasHook(void);
+
 #endif                          /* MYS_TABLECMDS_H */

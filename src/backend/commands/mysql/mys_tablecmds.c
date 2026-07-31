@@ -73,6 +73,7 @@
 #include "catalog/toasting.h"
 #include "commands/cluster.h"
 #include "commands/comment.h"
+#include "commands/createas.h"
 #include "commands/defrem.h"
 #include "commands/event_trigger.h"
 #include "commands/mysql/mys_tablecmds.h"
@@ -91,11 +92,13 @@
 #include "optimizer/optimizer.h"
 #include "parser/parse_coerce.h"
 #include "parser/parse_collate.h"
+#include "parser/parse_node.h"
 #include "parser/parse_relation.h"
 #include "parser/parse_type.h"
 #include "parser/parse_utilcmd.h"
 #include "parser/mysql/mys_parse_utilcmd.h"
 #include "parser/parser.h"
+#include "parser/parsereng.h"
 #include "partitioning/partbounds.h"
 #include "partitioning/partdesc.h"
 #include "rewrite/rewriteDefine.h"
@@ -17445,4 +17448,106 @@ mysPreProcessCreateViewStmt(ViewStmt *viewStmt)
 
         return stmts;
     }
+}
+
+/*
+ * create_mysql_ctas_on_update_triggers
+ *
+ * For CREATE TABLE AS / SELECT INTO executed through the MySQL protocol,
+ * inherit ON UPDATE triggers from source columns that carry the MySQL
+ * "ON UPDATE CURRENT_TIMESTAMP" attribute.
+ */
+static void
+create_mysql_ctas_on_update_triggers(ParseState *pstate, Query *query,
+									 Oid target_relid)
+{
+	Relation	target_rel;
+	const char *target_schema;
+	const char *target_name;
+	ListCell   *lc;
+	int			output_attnum = 0;
+
+	target_rel = table_open(target_relid, NoLock);
+	target_schema = get_namespace_name(RelationGetNamespace(target_rel));
+	target_name = RelationGetRelationName(target_rel);
+
+	foreach(lc, query->targetList)
+	{
+		TargetEntry *tle = lfirst_node(TargetEntry, lc);
+		Relation	source_rel;
+		Form_pg_attribute source_attr;
+		const char *target_colname;
+		CreateFunctionStmt *function_stmt;
+		CreateTrigStmt *trigger_stmt;
+
+		if (tle->resjunk)
+			continue;
+		output_attnum++;
+		if (!OidIsValid(tle->resorigtbl) || tle->resorigcol <= 0 ||
+			output_attnum > RelationGetDescr(target_rel)->natts)
+			continue;
+
+		source_rel = table_open(tle->resorigtbl, AccessShareLock);
+		if (tle->resorigcol > RelationGetDescr(source_rel)->natts)
+		{
+			table_close(source_rel, AccessShareLock);
+			continue;
+		}
+		source_attr = TupleDescAttr(RelationGetDescr(source_rel),
+									 tle->resorigcol - 1);
+		if (source_attr->attisdropped ||
+			!OidIsValid(mysGetColumnOnUpdateNowTrig(source_rel,
+												 NameStr(source_attr->attname))))
+		{
+			table_close(source_rel, AccessShareLock);
+			continue;
+		}
+		table_close(source_rel, AccessShareLock);
+
+		target_colname = NameStr(TupleDescAttr(RelationGetDescr(target_rel),
+											output_attnum - 1)->attname);
+		function_stmt = createAutoUpdateTimeStampTriggerFunc(
+			(char *) target_schema, (char *) target_name,
+			(char *) target_colname);
+		(void) CreateFunction(pstate, function_stmt);
+		CommandCounterIncrement();
+
+		trigger_stmt = createAutoUpdateTimeStampTrigger(
+			(char *) target_schema, (char *) target_name,
+			(char *) target_colname);
+		(void) CreateTrigger(trigger_stmt, NULL, target_relid, InvalidOid,
+						 InvalidOid, InvalidOid, InvalidOid, InvalidOid,
+						 NULL, false, false);
+		CommandCounterIncrement();
+	}
+
+	table_close(target_rel, NoLock);
+}
+
+/*
+ * mys_ctas_post_hook
+ *
+ * ExecCreateTableAs_post_hook implementation.  Only MySQL-mode backends
+ * need the ON UPDATE trigger inheritance; every other dialect falls
+ * through.
+ */
+static void
+mys_ctas_post_hook(ParseState *pstate, Query *query, Oid target_relid)
+{
+	if (MyCompatMode != COMPAT_PROTOCOL_MYSQL)
+		return;
+
+	create_mysql_ctas_on_update_triggers(pstate, query, target_relid);
+}
+
+/*
+ * InitMysCtasHook
+ *
+ * Register the CTAS post-hook.  Called during MySQL protocol
+ * initialization so that every forked backend inherits the hook.
+ */
+void
+InitMysCtasHook(void)
+{
+	ExecCreateTableAs_post_hook = mys_ctas_post_hook;
 }

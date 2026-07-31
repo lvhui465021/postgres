@@ -33,11 +33,13 @@
 #include "libpq/pqmq.h"
 #include "miscadmin.h"
 #include "optimizer/optimizer.h"
+#include "parser/parsereng.h"
 #include "pgstat.h"
 #include "storage/ipc.h"
 #include "storage/predicate.h"
 #include "storage/spin.h"
 #include "tcop/tcopprot.h"
+#include "utils/adtext.h"
 #include "utils/combocid.h"
 #include "utils/guc.h"
 #include "utils/inval.h"
@@ -98,6 +100,7 @@ typedef struct FixedParallelState
 	TimestampTz xact_ts;
 	TimestampTz stmt_ts;
 	SerializableXactHandle serializable_xact_handle;
+	CompatibilityProtocolKind protocol_kind;
 
 	/* Mutex protects remaining fields. */
 	slock_t		mutex;
@@ -355,6 +358,7 @@ InitializeParallelDSM(ParallelContext *pcxt)
 	fps->xact_ts = GetCurrentTransactionStartTimestamp();
 	fps->stmt_ts = GetCurrentStatementStartTimestamp();
 	fps->serializable_xact_handle = ShareSerializableXact();
+	fps->protocol_kind = MyCompatMode;
 	SpinLockInit(&fps->mutex);
 	fps->last_xlog_end = 0;
 	shm_toc_insert(pcxt->toc, PARALLEL_KEY_FIXED, fps);
@@ -1545,6 +1549,17 @@ ParallelWorkerMain(Datum main_arg)
 	clientconninfospace = shm_toc_lookup(toc, PARALLEL_KEY_CLIENTCONNINFO,
 										 false);
 	RestoreClientConnectionInfo(clientconninfospace);
+
+	/*
+	 * Restore the dialect context so that parallel workers apply the same
+	 * MySQL-compatibility semantics as the leader.  MyCompatMode is derived
+	 * from the protocol override on the leader's frontend connection, which
+	 * is not visible in a worker; without this, MySQL-mode queries executed
+	 * in parallel would silently fall back to standard PostgreSQL behavior.
+	 */
+	MyCompatMode = fps->protocol_kind;
+	InitParserEngine();
+	InitADTExt();
 
 	/*
 	 * Initialize SystemUser now that MyClientConnectionInfo is restored. Also

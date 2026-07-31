@@ -57,32 +57,18 @@ GetStandardADTExt(void)
 /*
  * InitADTExt
  *
- * Selects the ADT extension table based on database_compat_mode.
- * When running in MYSQL_COMPAT_MODE with an active MySQL protocol,
- * the MySQL-specific ADT functions (mys_date_in, mys_timestamp_in, etc.)
- * are installed; otherwise the standard pass-through table is used.
+ * Selects the ADT extension table based on the backend's dialect context
+ * (MyCompatMode).  The MySQL-specific ADT functions (mys_date_in,
+ * mys_timestamp_in, etc.) are installed for MySQL-mode backends;
+ * otherwise the standard pass-through table is used.
  */
 void
 InitADTExt(void)
 {
-	switch (database_compat_mode)
+	switch (MyCompatMode)
 	{
-		case POSTGRESQL_COMPAT_MODE:
-			adtext = GetStandardADTExt();
-			break;
-
-		case MYSQL_COMPAT_MODE:
-
-			if ((MyProcPort != NULL) &&
-				(MyProcPort->protocol_kind == COMPAT_PROTOCOL_MYSQL))
-			{
-				adtext = GetMysADTExt();
-			}
-			else
-			{
-				adtext = GetStandardADTExt();
-			}
-
+		case COMPAT_PROTOCOL_MYSQL:
+			adtext = GetMysADTExt();
 			break;
 
 		default:
