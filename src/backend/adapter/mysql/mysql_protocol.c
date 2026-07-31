@@ -821,7 +821,7 @@ mysql_session_initialize(Port *port)
 	 *   search_path = "<dbname>, \"$user\", public, mysql, pg_catalog"
 	 *
 	 * where <dbname> is the PostgreSQL database the MySQL backend is
-	 * pinned to (mysql.backend_database, default "postgres").  This
+	 * pinned to (mysql_backend_database, default "postgres").  This
 	 * keeps the backend database as the default namespace.  A PostgreSQL
 	 * database does not normally imply a same-named schema, so put writable
 	 * user namespaces before mysql and pg_catalog.  Otherwise an initial

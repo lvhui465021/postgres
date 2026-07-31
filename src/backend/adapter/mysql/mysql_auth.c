@@ -436,7 +436,7 @@ mysql_verify_login(MysPacketState *ps, Port *port)
     /* Set port fields — these are needed before InitPostgres().
      * port->database_name must always be set because BackendInitialize
      * dereferences it (and PostgresMain passes it to InitPostgres).
-     * MySQL connections use the configured mysql.backend_database (default
+     * MySQL connections use the configured mysql_backend_database (default
      * "postgres"), but since GUCs aren't available yet we hardcode the
      * same default. */
     port->user_name = MemoryContextStrdup(TopMemoryContext, username);

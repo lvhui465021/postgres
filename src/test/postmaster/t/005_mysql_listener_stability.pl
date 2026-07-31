@@ -115,9 +115,9 @@ $node->append_conf('pg_hba.conf',
 $node->append_conf('pg_hba.conf', "host all all 127.0.0.1/32 trust");
 $node->append_conf('postgresql.conf', "listen_addresses = '127.0.0.1'");
 $node->append_conf('postgresql.conf', "database_compat_mode = 'mysql'");
-$node->append_conf('postgresql.conf', "mysql.listener_on = true");
-$node->append_conf('postgresql.conf', "mysql.port = $mysql_port");
-$node->append_conf('postgresql.conf', "mysql.backend_database = 'postgres'");
+$node->append_conf('postgresql.conf', "mysql_listener_on = true");
+$node->append_conf('postgresql.conf', "mysql_port = $mysql_port");
+$node->append_conf('postgresql.conf', "mysql_backend_database = 'postgres'");
 $node->append_conf('postgresql.conf', "statement_timeout = '500ms'");
 $node->start;
 

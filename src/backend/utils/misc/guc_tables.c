@@ -1109,9 +1109,9 @@ struct config_bool ConfigureNamesBool[] =
 		check_bonjour, NULL, NULL
 	},
 	{
-		{"mysql.listener_on", PGC_POSTMASTER, CONN_AUTH_SETTINGS,
+		{"mysql_listener_on", PGC_POSTMASTER, CONN_AUTH_SETTINGS,
 			gettext_noop("Enables the MySQL compatibility listener."),
-			gettext_noop("The listener uses listen_addresses and mysql.port."),
+			gettext_noop("The listener uses listen_addresses and mysql_port."),
 			GUC_SUPERUSER_ONLY
 		},
 		&mysql_listener_on,
@@ -2551,7 +2551,7 @@ struct config_int ConfigureNamesInt[] =
 	},
 
 	{
-		{"mysql.port", PGC_POSTMASTER, CONN_AUTH_SETTINGS,
+		{"mysql_port", PGC_POSTMASTER, CONN_AUTH_SETTINGS,
 			gettext_noop("Sets the TCP port for the MySQL compatibility listener."),
 			NULL,
 			GUC_SUPERUSER_ONLY
@@ -2562,7 +2562,7 @@ struct config_int ConfigureNamesInt[] =
 	},
 
 	{
-		{"mysql.max_allowed_packet", PGC_SIGHUP, CONN_AUTH_SETTINGS,
+		{"mysql_max_allowed_packet", PGC_SIGHUP, CONN_AUTH_SETTINGS,
 			gettext_noop("Sets the maximum MySQL packet payload accepted by a backend."),
 			NULL,
 			GUC_UNIT_BYTE | GUC_SUPERUSER_ONLY
@@ -4718,7 +4718,7 @@ struct config_string ConfigureNamesString[] =
 	},
 
 	{
-		{"mysql.backend_database", PGC_POSTMASTER, CONN_AUTH_SETTINGS,
+		{"mysql_backend_database", PGC_POSTMASTER, CONN_AUTH_SETTINGS,
 			gettext_noop("Sets the physical PostgreSQL database used by MySQL sessions."),
 			gettext_noop("The MySQL protocol database name selects a schema and does not override this setting."),
 			GUC_SUPERUSER_ONLY
@@ -4729,7 +4729,7 @@ struct config_string ConfigureNamesString[] =
 	},
 
 	{
-		{"mysql.server_version", PGC_SIGHUP, CONN_AUTH_SETTINGS,
+		{"mysql_server_version", PGC_SIGHUP, CONN_AUTH_SETTINGS,
 			gettext_noop("Sets the server version advertised by the MySQL listener."),
 			NULL,
 			GUC_SUPERUSER_ONLY
@@ -5505,7 +5505,7 @@ struct config_enum ConfigureNamesEnum[] =
 	},
 
 	{
-		{"database_compat_mode", PGC_POSTMASTER, CUSTOM_OPTIONS,
+		{"database_compat_mode", PGC_POSTMASTER, COMPAT_OPTIONS_OTHER,
 			gettext_noop("Sets the database compatibility mode."),
 			NULL,
 			GUC_SUPERUSER_ONLY
