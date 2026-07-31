@@ -57,6 +57,16 @@ mys_backend_parser = custom_target('mys_gram',
 )
 generated_sources += mys_backend_parser.to_list()
 
+# MySQL keyword hash generation (mys_kwlist_d.h)
+mys_kwlist_d = custom_target('mys_kwlist_d',
+  input: join_paths(meson.project_source_root(), 'src', 'include', 'parser', 'mysql', 'mys_kwlist.h'),
+  output: 'mys_kwlist_d.h',
+  command: [perl, join_paths(meson.project_source_root(), 'src', 'tools', 'gen_keywordlist.pl'),
+            '--extern', '--output', '@OUTDIR@', '--varname=MysScanKeywords', '@INPUT@'],
+)
+generated_sources += mys_kwlist_d
+parser_sources += mys_kwlist_d
+
 # MySQL keyword source needs the generated mys_kwlist_d.h header
 parser_sources += files('mysql/mys_keywords.c')
 parser_sources += files('mysql/mys_parser.c')
