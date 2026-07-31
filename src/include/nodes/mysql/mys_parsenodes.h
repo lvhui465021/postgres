@@ -28,7 +28,7 @@
  */
 typedef struct UserVarRef
 {
-    pg_node_attr(no_query_jumble)
+    pg_node_attr(no_query_jumble, nodetag_number(480))
 
     NodeTag     type;
     char       *userVarName;   /* pstrdup'd identifier after '@'  */
@@ -41,7 +41,7 @@ typedef struct UserVarRef
  */
 typedef struct UserVarAssign
 {
-    pg_node_attr(no_query_jumble)
+    pg_node_attr(no_query_jumble, nodetag_number(481))
 
     NodeTag     type;
     char       *userVarName;   /* pstrdup'd identifier after '@'  */
@@ -55,7 +55,7 @@ typedef struct UserVarAssign
  */
 typedef struct SysVarRef
 {
-    pg_node_attr(no_query_jumble)
+    pg_node_attr(no_query_jumble, nodetag_number(482))
 
     NodeTag     type;
     char       *sysVarName;    /* pstrdup'd identifier after '@@' */
@@ -68,7 +68,7 @@ typedef struct SysVarRef
  */
 typedef struct MysVariableSetStmt
 {
-    pg_node_attr(no_query_jumble)
+    pg_node_attr(no_query_jumble, nodetag_number(483))
 
     NodeTag     type;
     List       *assignments;    /* list of UserVarAssign / SysVarRef */
@@ -81,7 +81,7 @@ typedef struct MysVariableSetStmt
  */
 typedef struct MysSelectIntoStmt
 {
-    pg_node_attr(no_query_jumble)
+    pg_node_attr(no_query_jumble, nodetag_number(484))
 
     NodeTag     type;
     Node       *selectStmt;     /* the wrapped SELECT statement    */
