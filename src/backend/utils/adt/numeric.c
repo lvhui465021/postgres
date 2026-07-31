@@ -35,6 +35,7 @@
 #include "nodes/nodeFuncs.h"
 #include "nodes/supportnodes.h"
 #include "optimizer/optimizer.h"
+#include "utils/adtext.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/float.h"
@@ -647,6 +648,9 @@ numeric_in(PG_FUNCTION_ARGS)
 	const char *numstart;
 	int			sign;
 
+	if (adtext != NULL && adtext->pre_numeric_in != NULL)
+		str = adtext->pre_numeric_in(str);
+
 	/* Skip leading spaces */
 	cp = str;
 	while (*cp)
@@ -838,6 +842,9 @@ numeric_out(PG_FUNCTION_ARGS)
 	init_var_from_num(num, &x);
 
 	str = get_str_from_var(&x);
+
+	if (adtext != NULL && adtext->post_numeric_out != NULL)
+		str = adtext->post_numeric_out(str);
 
 	PG_RETURN_CSTRING(str);
 }
