@@ -22,45 +22,14 @@
 #include "nodes/nodes.h"
 #include "nodes/pg_list.h"
 
-/* ----------------------------------------------------------------
- *    MySQL user-variable reference:  @name  (read)
- * ----------------------------------------------------------------
+/*
+ * The MySQL user/system variable expression nodes (UserVarRef,
+ * UserVarAssign, SysVarRef) were degraded to standard FuncCall nodes:
+ * @name -> pg_catalog.mys_get_user_var('name'), @name := expr ->
+ * pg_catalog.mys_set_user_var('name', expr), @@name ->
+ * pg_catalog.mys_get_system_variable('name', bool).  Only the statement-
+ * level utility nodes remain, consumed by the dialect process_utility.
  */
-typedef struct UserVarRef
-{
-    pg_node_attr(no_query_jumble, nodetag_number(480))
-
-    NodeTag     type;
-    char       *userVarName;   /* pstrdup'd identifier after '@'  */
-    ParseLoc    location;       /* token start, or -1 if unknown  */
-} UserVarRef;
-
-/* ----------------------------------------------------------------
- *    MySQL user-variable assignment:  @name := expr
- * ----------------------------------------------------------------
- */
-typedef struct UserVarAssign
-{
-    pg_node_attr(no_query_jumble, nodetag_number(481))
-
-    NodeTag     type;
-    char       *userVarName;   /* pstrdup'd identifier after '@'  */
-    Node       *expr;           /* assigned expression (a_expr)    */
-    ParseLoc    location;       /* token start, or -1 if unknown  */
-} UserVarAssign;
-
-/* ----------------------------------------------------------------
- *    MySQL system-variable reference:  @@name  (reserved)
- * ----------------------------------------------------------------
- */
-typedef struct SysVarRef
-{
-    pg_node_attr(no_query_jumble, nodetag_number(482))
-
-    NodeTag     type;
-    char       *sysVarName;    /* pstrdup'd identifier after '@@' */
-    ParseLoc    location;       /* token start, or -1 if unknown  */
-} SysVarRef;
 
 /* ----------------------------------------------------------------
  *    MySQL SET / variable-assignment utility statement  (reserved)

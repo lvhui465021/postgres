@@ -1929,7 +1929,6 @@ MysStringAssignmentValue(Node *arg)
 static const char *
 MysSqlModeAssignmentValue(Node *arg)
 {
-	SysVarRef  *ref;
 	const char *name;
 	bool		is_session = true;
 	char	   *value = NULL;
@@ -1974,26 +1973,7 @@ MysSqlModeAssignmentValue(Node *arg)
 		return NULL;
 	}
 
-	if (!IsA(arg, SysVarRef))
-		return MysStringAssignmentValue(arg);
-
-	ref = castNode(SysVarRef, arg);
-	name = ref->sysVarName;
-	if (pg_strncasecmp(name, "session.", 8) == 0)
-		name += 8;
-	else if (pg_strncasecmp(name, "local.", 6) == 0)
-		name += 6;
-	else if (pg_strncasecmp(name, "global.", 7) == 0)
-	{
-		name += 7;
-		is_session = false;
-	}
-
-	if (pg_strcasecmp(name, "sql_mode") != 0)
-		return NULL;
-
-	getSystemVariableValueForSelect(pstrdup(name), is_session, &value);
-	return value;
+	return MysStringAssignmentValue(arg);
 }
 
 static bool
