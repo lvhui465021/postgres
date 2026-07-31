@@ -6,7 +6,22 @@
 #include "fmgr.h"
 #include "utils/pg_locale.h"
 #include "catalog/pg_collation_d.h"
+#include "utils/mysql/mys_adtext.h"
 PG_MODULE_MAGIC;
+
+/*
+ * _PG_init
+ *
+ * Register the MySQL ADT method table so that MySQL-mode backends
+ * dispatch type-input/output through it.  mysm is loaded via
+ * shared_preload_libraries in MySQL-mode clusters; the registration runs
+ * in the postmaster before any backend forks.
+ */
+void
+_PG_init(void)
+{
+	InitMysADTExt();
+}
 
 /* lc_collate_is_c — PG14 public → PG18: wrapper using pg_locale internals */
 bool

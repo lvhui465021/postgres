@@ -355,6 +355,9 @@ $node->append_conf('postgresql.conf', "mysql_listener_on = true");
 $node->append_conf('postgresql.conf', "mysql_port = $mysql_port");
 $node->append_conf('postgresql.conf', "mysql_backend_database = 'postgres'");
 $node->append_conf('postgresql.conf', "listen_addresses = '127.0.0.1'");
+# mysm registers the MySQL ADT method table in _PG_init; preload so the
+# MySQL type semantics apply from session start.
+$node->append_conf('postgresql.conf', "shared_preload_libraries = 'mysm'");
 # Kill any stale listener on 3308
 system("fuser -k $mysql_port/tcp 2>/dev/null");
 $node->restart;

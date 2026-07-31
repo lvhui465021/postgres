@@ -60,7 +60,6 @@
 #include "tcop/tcopprot.h"
 #include "parser/parsereng.h"
 #include "utils/adtext.h"
-#include "utils/mysql/mys_adtext.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
@@ -1268,9 +1267,6 @@ InitPostgres(const char *in_dbname, Oid dboid,
 
 	/* Initialize Parser Engine (selects PG or MySQL parser per compat mode) */
 	InitParserEngine();
-
-	/* Register MySQL ADT table before the extension dispatch is resolved. */
-	InitMysADTExt();
 
 	/* Initialize ADT Extension (selects PG or MySQL type hooks per compat mode) */
 	InitADTExt();
