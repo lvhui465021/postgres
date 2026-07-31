@@ -11,9 +11,9 @@ extension_installed	1
 
 --------------
 SELECT 'protocol_listener_on' AS test_name,
-       current_setting('mysql.listener_on') = 'on'
-       AND current_setting('mysql.port') IS NOT NULL
-       AND current_setting('mysql.max_allowed_packet') IS NOT NULL
+       current_setting('mysql_listener_on') = 'on'
+       AND current_setting('mysql_port') IS NOT NULL
+       AND current_setting('mysql_max_allowed_packet') IS NOT NULL
        AS passed
 --------------
 

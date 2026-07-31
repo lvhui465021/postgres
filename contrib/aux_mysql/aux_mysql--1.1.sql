@@ -1274,7 +1274,7 @@ LANGUAGE SQL;
 -- VERSION()
 CREATE OR REPLACE FUNCTION mysql.version()
 RETURNS text
-AS 'SELECT pg_catalog.current_setting(''mysql.server_version'')'
+AS 'SELECT pg_catalog.current_setting(''mysql_server_version'')'
 LANGUAGE SQL;
 
 -- CONNECTION_ID()

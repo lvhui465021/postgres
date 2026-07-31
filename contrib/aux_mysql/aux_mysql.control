@@ -1,6 +1,6 @@
 # aux_mysql extension
 comment = 'MySQL supplementary extension'
-default_version = '1.1'
+default_version = '1.5'
 module_pathname = '$libdir/mysm'
 schema = mysql
 relocatable = false

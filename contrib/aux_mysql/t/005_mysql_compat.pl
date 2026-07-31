@@ -56,16 +56,17 @@ $node->start;
 
 my $mysql_port = PostgreSQL::Test::Cluster::get_free_port();
 $node->append_conf('postgresql.conf', "database_compat_mode = 'mysql'");
-$node->append_conf('postgresql.conf', "mysql.listener_on = true");
-$node->append_conf('postgresql.conf', "mysql.port = $mysql_port");
+$node->append_conf('postgresql.conf', "mysql_listener_on = true");
+$node->append_conf('postgresql.conf', "mysql_port = $mysql_port");
 $node->append_conf('postgresql.conf',
-    "mysql.backend_database = 'postgres'");
+    "mysql_backend_database = 'postgres'");
 $node->append_conf('postgresql.conf', "listen_addresses = '127.0.0.1'");
 $node->restart;
 sleep 1;
 
 # --- create extension and test user ------------------------------------
-$node->safe_psql('postgres', 'CREATE EXTENSION aux_mysql CASCADE');
+$node->safe_psql('postgres',
+    "CREATE EXTENSION aux_mysql VERSION '1.1' CASCADE");
 $node->safe_psql('postgres', 'ALTER EXTENSION aux_mysql UPDATE TO "1.2"');
 $node->safe_psql('postgres', 'ALTER EXTENSION aux_mysql UPDATE TO "1.3"');
 $node->safe_psql('postgres', 'ALTER EXTENSION aux_mysql UPDATE TO "1.4"');

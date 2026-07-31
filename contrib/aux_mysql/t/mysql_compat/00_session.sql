@@ -6,9 +6,9 @@ SELECT 'extension_installed' AS test_name,
        COUNT(*) = 1 AND COALESCE(MAX(extversion), 'missing') <> 'missing' AS passed
 FROM pg_extension WHERE extname = 'aux_mysql';
 SELECT 'protocol_listener_on' AS test_name,
-       current_setting('mysql.listener_on') = 'on'
-       AND current_setting('mysql.port') IS NOT NULL
-       AND current_setting('mysql.max_allowed_packet') IS NOT NULL
+       current_setting('mysql_listener_on') = 'on'
+       AND current_setting('mysql_port') IS NOT NULL
+       AND current_setting('mysql_max_allowed_packet') IS NOT NULL
        AS passed;
 SELECT 'packet_and_charset_variables' AS test_name,
        @@max_allowed_packet > 0 AND @@character_set_client = 'utf8mb4'

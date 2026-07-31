@@ -1,4 +1,4 @@
-CREATE EXTENSION aux_mysql;
+CREATE EXTENSION aux_mysql VERSION '1.1';
 
 SELECT extversion
 FROM pg_extension

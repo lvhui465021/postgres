@@ -3068,10 +3068,12 @@ select
     sch.nspname::varchar(256) as SCHEMA_NAME,
     'utf8mb4'::varchar(256) as DEFAULT_CHARACTER_SET_NAME,
     'utf8mb4_general_ci'::varchar(256) as DEFAULT_COLLATION_NAME,
-    'NULL'::varchar(256) as SQL_PATH
+    NULL::varchar(256) as SQL_PATH
 from pg_catalog.pg_namespace sch
 WHERE sch.nspname !~ '^pg_'
-ORDER BY 1;
+  AND sch.nspname <> 'public'
+  AND sch.nspname <> 'mys_informa_schema'
+ORDER BY 2;
 
 drop view if exists mys_informa_schema.views;
 create view mys_informa_schema.views as
