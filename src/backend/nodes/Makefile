@@ -45,7 +45,6 @@ node_headers = \
 	nodes/pathnodes.h \
 	nodes/plannodes.h \
 	nodes/execnodes.h \
-	nodes/mysql/mys_parsenodes.h \
 	access/amapi.h \
 	access/cmptype.h \
 	access/sdir.h \
@@ -62,7 +61,8 @@ node_headers = \
 	nodes/replnodes.h \
 	nodes/supportnodes.h \
 	nodes/value.h \
-	utils/rel.h
+	utils/rel.h \
+	nodes/mysql/mys_parsenodes.h
 
 # see also catalog/Makefile for an explanation of these make rules
 

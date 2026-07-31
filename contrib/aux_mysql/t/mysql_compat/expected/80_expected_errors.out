@@ -64,17 +64,17 @@ ERROR 3819 (HY000) at line 18: value for domain "tinyint unsigned" violates chec
 SELECT DATE('2024-02-30')
 --------------
 
-ERROR 1292 (22007) at line 19: date/time field value out of range: "2024-02-30"
+ERROR 1292 (22007) at line 19: Incorrect datetime value: '2024-02-30'
 --------------
 SELECT DATE('0000-00-00')
 --------------
 
-ERROR 1292 (22007) at line 20: date/time field value out of range: "0000-00-00"
+ERROR 1292 (22007) at line 20: Incorrect datetime value: '0000-00-00'
 --------------
 SELECT TIMESTAMP('2024-13-01 00:00:00')
 --------------
 
-ERROR 1292 (22007) at line 21: date/time field value out of range: "2024-13-01 00:00:00"
+ERROR 1292 (22007) at line 21: Incorrect datetime value: '2024-13-01 00:00:00'
 --------------
 CREATE TABLE mysql_negative_values(id INT)
 --------------
