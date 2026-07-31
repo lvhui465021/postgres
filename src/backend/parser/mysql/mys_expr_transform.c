@@ -14,71 +14,6 @@
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
 
-static Node *
-mys_transform_user_var_call(ParseState *pstate, const char *function_name,
-							const char *user_var_name, Node *value,
-							ParseLoc location)
-{
-	A_Const    *name;
-	List       *args;
-	FuncCall   *call;
-
-	name = makeNode(A_Const);
-	name->val.sval.type = T_String;
-	name->val.sval.sval = pstrdup(user_var_name);
-	name->location = location;
-
-	args = list_make1(name);
-	if (value != NULL)
-	{
-		if (IsA(value, A_Const) &&
-			(castNode(A_Const, value)->isnull ||
-			 castNode(A_Const, value)->val.node.type == T_String))
-		{
-			TypeCast *cast = makeNode(TypeCast);
-
-			cast->arg = value;
-			cast->typeName = makeTypeName(pstrdup("text"));
-			cast->location = location;
-			value = (Node *) cast;
-		}
-		args = lappend(args, value);
-	}
-
-	call = makeFuncCall(list_make2(makeString("pg_catalog"),
-								 makeString(pstrdup(function_name))),
-					args, COERCE_EXPLICIT_CALL, location);
-
-	return transformExpr(pstate, (Node *) call, pstate->p_expr_kind);
-}
-
-static Node *
-mys_transform_noarg_call(ParseState *pstate, const char *function_name,
-					 ParseLoc location)
-{
-	FuncCall   *call;
-
-	call = makeFuncCall(list_make2(makeString("pg_catalog"),
-								 makeString(pstrdup(function_name))),
-					NIL, COERCE_EXPLICIT_CALL, location);
-	return transformExpr(pstate, (Node *) call, pstate->p_expr_kind);
-}
-
-static Node *
-mys_transform_system_var_call(ParseState *pstate, const char *name,
-						  bool is_session, ParseLoc location)
-{
-	FuncCall   *call;
-	List	   *args;
-
-	args = list_make2(makeStringConst(pstrdup(name), location),
-					  makeStringConst(is_session ? "true" : "false", location));
-	call = makeFuncCall(list_make2(makeString("pg_catalog"),
-								 makeString("mys_get_system_variable")),
-					args, COERCE_EXPLICIT_CALL, location);
-	return transformExpr(pstate, (Node *) call, pstate->p_expr_kind);
-}
-
 /*
  * MySQL exposes the source spelling of unaliased literals as their result
  * column label (for example, SELECT 1 produces a column named "1").  The
@@ -166,105 +101,6 @@ mys_transform_expr_node(ParseState *pstate, Node *expr, Node **result)
 
     switch (nodeTag(expr))
     {
-    case T_SysVarRef:
-		{
-			SysVarRef  *sv = (SysVarRef *) expr;
-			const char *val;
-			const char *sql_mode_name = NULL;
-			bool		is_session = true;
-
-            if (pg_strcasecmp(sv->sysVarName, "time_zone") == 0 ||
-                pg_strcasecmp(sv->sysVarName, "session.time_zone") == 0 ||
-                pg_strcasecmp(sv->sysVarName, "local.time_zone") == 0)
-            {
-                *result = mys_transform_noarg_call(pstate,
-                                                    "mys_get_session_time_zone",
-                                                    sv->location);
-                return true;
-            }
-			else if (pg_strcasecmp(sv->sysVarName, "global.time_zone") == 0)
-			{
-				*result = mys_transform_noarg_call(pstate,
-													"mys_get_global_time_zone",
-													sv->location);
-				return true;
-			}
-			else if (pg_strcasecmp(sv->sysVarName, "autocommit") == 0 ||
-					 pg_strcasecmp(sv->sysVarName, "session.autocommit") == 0 ||
-					 pg_strcasecmp(sv->sysVarName, "local.autocommit") == 0)
-				val = MysAutocommitEnabled() ? "1" : "0";
-			else if (pg_strcasecmp(sv->sysVarName, "character_set_client") == 0 ||
-					 pg_strcasecmp(sv->sysVarName, "character_set_connection") == 0 ||
-					 pg_strcasecmp(sv->sysVarName, "character_set_results") == 0 ||
-					 pg_strcasecmp(sv->sysVarName, "character_set_server") == 0)
-				val = "utf8mb4";
-			else if (pg_strcasecmp(sv->sysVarName, "collation_connection") == 0 ||
-					 pg_strcasecmp(sv->sysVarName, "session.collation_connection") == 0)
-				val = "utf8mb4_general_ci";
-			else if (pg_strcasecmp(sv->sysVarName, "collation_server") == 0)
-				val = "utf8mb4_general_ci";
-			else if (pg_strcasecmp(sv->sysVarName, "collation_database") == 0)
-				val = "utf8mb4_general_ci";
-			else if (pg_strcasecmp(sv->sysVarName, "max_allowed_packet") == 0)
-				val = "16777216";
-			else if (pg_strcasecmp(sv->sysVarName, "sql_mode") == 0)
-				sql_mode_name = "sql_mode";
-			else if (pg_strcasecmp(sv->sysVarName, "session.sql_mode") == 0 ||
-					 pg_strcasecmp(sv->sysVarName, "local.sql_mode") == 0)
-				sql_mode_name = "sql_mode";
-			else if (pg_strcasecmp(sv->sysVarName, "global.sql_mode") == 0)
-			{
-				sql_mode_name = "sql_mode";
-				is_session = false;
-			}
-			else if (pg_strcasecmp(sv->sysVarName, "wait_timeout") == 0 ||
-					 pg_strcasecmp(sv->sysVarName, "interactive_timeout") == 0)
-				val = "28800";
-            else if (pg_strcasecmp(sv->sysVarName, "version_comment") == 0)
-                val = mysql_server_version;
-            else if (pg_strcasecmp(sv->sysVarName, "version") == 0)
-                val = mysql_server_version;
-			else
-				val = sv->sysVarName;
-
-			if (sql_mode_name != NULL)
-			{
-				*result = mys_transform_system_var_call(pstate, sql_mode_name,
-												 is_session, sv->location);
-				return true;
-			}
-
-            *result = (Node *) make_const(pstate,
-                         (A_Const *) makeStringConst(pstrdup(val), sv->location));
-            return true;
-        }
-
-	case T_UserVarRef:
-		{
-			UserVarRef *uv = (UserVarRef *) expr;
-			Oid		valueType;
-
-			*result = mys_transform_user_var_call(pstate,
-											"mys_get_user_var", uv->userVarName,
-											NULL, uv->location);
-			valueType = mysGetUserVarTypeInternal(uv->userVarName);
-			if (OidIsValid(valueType))
-			{
-				Node *coerced = coerce_to_target_type(pstate, *result,
-															TEXTOID, getBaseType(valueType), -1,
-															COERCION_EXPLICIT,
-															COERCE_EXPLICIT_CAST,
-															uv->location);
-
-				if (coerced == NULL)
-					ereport(ERROR,
-							(errcode(ERRCODE_CANNOT_COERCE),
-							 errmsg("cannot coerce MySQL user variable")));
-				*result = coerced;
-			}
-			return true;
-		}
-
 	case T_A_Expr:
 		{
 			A_Expr *aexpr = (A_Expr *) expr;
@@ -326,6 +162,41 @@ mys_transform_expr_node(ParseState *pstate, Node *expr, Node **result)
 		{
 			FuncCall *fn = (FuncCall *) expr;
 			bool		is_mysql_concat = false;
+
+			/*
+			 * The grammar lowers @name to pg_catalog.mys_get_user_var('name').
+			 * Coerce the text result to the stored variable type so that
+			 * arithmetic on an integer user variable resolves to the numeric
+			 * operator (e.g. SELECT @n + 1 with SET @n := 5).
+			 */
+			if (list_length(fn->funcname) == 2 &&
+				pg_strcasecmp(strVal(linitial(fn->funcname)), "pg_catalog") == 0 &&
+				pg_strcasecmp(strVal(lsecond(fn->funcname)), "mys_get_user_var") == 0 &&
+				list_length(fn->args) == 1 && IsA(linitial(fn->args), A_Const))
+			{
+				A_Const    *name_const = (A_Const *) linitial(fn->args);
+				Oid			valueType;
+				Node	   *coerced;
+
+				if (!name_const->isnull &&
+					name_const->val.node.type == T_String &&
+					OidIsValid(valueType = mysGetUserVarTypeInternal(
+								   name_const->val.sval.sval)))
+				{
+					coerced = coerce_to_target_type(pstate, (Node *) fn,
+													TEXTOID,
+													getBaseType(valueType), -1,
+													COERCION_EXPLICIT,
+													COERCE_EXPLICIT_CAST,
+													fn->location);
+					if (coerced == NULL)
+						ereport(ERROR,
+								(errcode(ERRCODE_CANNOT_COERCE),
+								 errmsg("cannot coerce MySQL user variable")));
+					*result = coerced;
+					return true;
+				}
+			}
 
 			/*
 			 * PG16 routed function resolution through mys_ParseFuncOrColumn(),
@@ -403,15 +274,6 @@ mys_transform_expr_node(ParseState *pstate, Node *expr, Node **result)
 			}
 			break;
 		}
-
-    case T_UserVarAssign:
-        {
-            UserVarAssign *ua = (UserVarAssign *) expr;
-			*result = mys_transform_user_var_call(pstate,
-											"mys_set_user_var", ua->userVarName,
-											ua->expr, ua->location);
-            return true;
-        }
 
     default:
         break;

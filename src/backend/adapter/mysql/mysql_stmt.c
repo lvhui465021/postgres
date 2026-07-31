@@ -246,15 +246,35 @@ mys_stmt_resolve_ambiguous_numeric_params_walker(Node *node, void *arg)
 		return false;
 	/*
 	 * The core raw-expression walker deliberately knows nothing about the
-	 * MySQL-only raw nodes.  They are lowered later by the ParserRoutine;
+	 * MySQL-only raw nodes.  They are lowered by the grammar to
+	 * pg_catalog.mys_get_user_var / mys_set_user_var / etc. FuncCall nodes;
 	 * this narrow pre-analysis pass only needs to visit the RHS of a user
 	 * assignment, where an ambiguous ? + ? may still occur.
 	 */
-	if (IsA(node, SysVarRef) || IsA(node, UserVarRef))
+	if (IsA(node, FuncCall))
+	{
+		FuncCall   *fn = (FuncCall *) node;
+		ListCell   *lc;
+
+		/* user/system variable reads are leaf references */
+		if (list_length(fn->funcname) == 2 &&
+			pg_strcasecmp(strVal(linitial(fn->funcname)), "pg_catalog") == 0)
+		{
+			char	   *fname = strVal(lsecond(fn->funcname));
+
+			if (pg_strcasecmp(fname, "mys_get_user_var") == 0 ||
+				pg_strcasecmp(fname, "mys_get_system_variable") == 0)
+				return false;
+		}
+
+		foreach(lc, fn->args)
+		{
+			if (mys_stmt_resolve_ambiguous_numeric_params_walker(
+					(Node *) lfirst(lc), arg))
+				return true;
+		}
 		return false;
-	if (IsA(node, UserVarAssign))
-		return mys_stmt_resolve_ambiguous_numeric_params_walker(
-			((UserVarAssign *) node)->expr, arg);
+	}
 	if (IsA(node, A_Expr))
 	{
 		expr = (A_Expr *) node;
