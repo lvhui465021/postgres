@@ -197,3 +197,32 @@ subdir('replication/libpqwalreceiver')
 subdir('replication/pgoutput')
 subdir('snowball')
 subdir('utils/mb/conversion_procs')
+
+# Verify that every symbol imported by the MySQL-compatibility shared
+# libraries resolves against the postgres binary (G3 contract).
+test('mysql_kernel_exports',
+  find_program(join_paths(meson.project_source_root(), 'src', 'tools', 'check_mysql_kernel_exports.sh')),
+  args: [postgres, mysm],
+  depends: [postgres, mysm])
+
+# Detect silent semantic drift between the MySQL fork files and their
+# upstream counterparts (a merge conflict would self-report; drift does not).
+# The forks currently contain functions / grammar rules that diverge from
+# upstream by more than the threshold; this is the known baseline to be
+# worked down, hence should_fail: the check reports drift (expected
+# failure) now, and an unexpected pass once a function falls back under the
+# threshold, prompting removal of the should_fail flag.
+check_fork_drift = find_program(
+  join_paths(meson.project_source_root(), 'src', 'tools', 'check_mysql_fork_drift.sh'))
+test('mysql_fork_drift_tablecmds',
+  check_fork_drift,
+  args: ['50',
+    join_paths(meson.project_source_root(), 'src', 'backend', 'commands', 'mysql', 'mys_tablecmds.c'),
+    join_paths(meson.project_source_root(), 'src', 'backend', 'commands', 'tablecmds.c')],
+  should_fail: true)
+test('mysql_fork_drift_gram',
+  check_fork_drift,
+  args: ['30',
+    join_paths(meson.project_source_root(), 'src', 'backend', 'parser', 'mysql', 'mys_gram.y'),
+    join_paths(meson.project_source_root(), 'src', 'backend', 'parser', 'gram.y')],
+  should_fail: true)
