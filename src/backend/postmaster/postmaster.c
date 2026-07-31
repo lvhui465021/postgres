@@ -1464,6 +1464,10 @@ InitializeProtocolListeners(void)
 	/* Register MySQL protocol routine so COMPAT_PROTOCOL_MYSQL can resolve. */
 	InitMySQLProtocolRoutine();
 
+	/* Let extensions start additional protocol listeners. */
+	if (listen_init_hook != NULL)
+		listen_init_hook();
+
 	/* Open the MySQL TCP listener when enabled.  (Unix socket deferred.) */
 	if (mysql_listener_on)
 	{

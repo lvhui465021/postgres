@@ -120,6 +120,9 @@ mys_figure_colname(Node *expr)
 	if (IsA(expr, UserVarRef))
 		return psprintf("@%s", ((UserVarRef *) expr)->userVarName);
 
+	if (IsA(expr, SysVarRef))
+		return psprintf("@@%s", ((SysVarRef *) expr)->sysVarName);
+
 	return NULL;
 }
 

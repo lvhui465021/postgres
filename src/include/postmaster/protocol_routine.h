@@ -109,6 +109,15 @@ extern void   AssignProtocolRoutine(Port *port);
 extern void   RegisterProtocolRoutine(const ProtocolRoutine *routine);
 extern bool   CompatibilityProtocolKindIsValid(CompatibilityProtocolKind kind);
 
+/*
+ * listen_init_hook -- invoked during postmaster startup so that additional
+ * wire-protocol listeners (MySQL, TDS, ...) can register their protocol
+ * routine and open their listener socket.  Built-in protocols are started
+ * directly by the postmaster; extensions set this hook in their _PG_init.
+ */
+typedef void (*listen_init_hook_type) (void);
+extern PGDLLEXPORT listen_init_hook_type listen_init_hook;
+
 /* ----------------------------------------------------------------
  *    Helper functions called from postgres.c / dest.c
  * ----------------------------------------------------------------

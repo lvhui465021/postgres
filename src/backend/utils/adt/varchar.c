@@ -21,6 +21,7 @@
 #include "common/hashfn.h"
 #include "libpq/pqformat.h"
 #include "libpq/libpq-be.h"
+#include "utils/adtext.h"
 #include "postmaster/protocol_routine.h"
 #include "mb/pg_wchar.h"
 #include "nodes/nodeFuncs.h"
@@ -51,14 +52,12 @@ anychar_typmodin(ArrayType *ta, const char *typename)
 
 	/*
 	 * MySQL protocol permits CHAR(0) and VARCHAR(0); standard PG mode
-	 * requires at least 1.  (Matches openHalo adtext->allow_zero_length.)
+	 * requires at least 1.
 	 */
 	{
-		const ProtocolRoutine *routine = GetCurrentProtocolRoutine();
 		int32		min_length;
 
-		min_length = (routine != NULL &&
-					  routine->kind == COMPAT_PROTOCOL_MYSQL) ? 0 : 1;
+		min_length = adtext->allow_zero_length_char_typmod ? 0 : 1;
 
 		if (*tl < min_length)
 			ereport(ERROR,

@@ -2040,12 +2040,6 @@ FigureColnameInternal(Node *node, char **name)
 						 (int) ((JsonFuncExpr *) node)->op);
 			}
 			break;
-		case T_SysVarRef:
-			{
-				SysVarRef *sv = (SysVarRef *) node;
-				*name = psprintf("@@%s", sv->sysVarName);
-				return 2;
-			}
 		default:
 			break;
 	}
