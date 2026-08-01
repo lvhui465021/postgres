@@ -1648,160 +1648,49 @@ mysql_user_variable:
 VariableSetStmt:
             SET set_variables
                 {
-                    MysVariableSetStmt *rt = makeNode(MysVariableSetStmt);
+                    VariableSetStmt *n = makeNode(VariableSetStmt);
                     SelectStmt *result = makeNode(SelectStmt);
                     result->targetList = $2;
 
-                    rt->assignments = list_make1(result);
+                    n->kind = VAR_SET_VALUE;
+                    n->name = "mysql._set_batch";
+                    n->args = list_make1(result);
+                    n->location = @1;
 
-                    $$ = (Node *) rt;
+                    $$ = (Node *) n;
                 }
             | SET TRANSACTION transaction_mode_list
                 {
-                    MysVariableSetStmt *rt = makeNode(MysVariableSetStmt);
-                    SelectStmt *result = makeNode(SelectStmt);
-                    ListCell *lc;
-                    foreach(lc, $3)
-                    {
-                        ResTarget *target;
-                        Node *funcCall;
-                        List *funcName;
-                        List *argList;
-                        char arg[256];
-                        DefElem *defElem;
+                    VariableSetStmt *n = makeNode(VariableSetStmt);
 
-                        target = makeNode(ResTarget);
-                        funcName = list_make2(makeString(pstrdup("mysql")),
-                                              makeString(pstrdup("set_system_session_variable")));
-                        defElem = (DefElem *) lfirst(lc);
-                        if (((A_Const*)(defElem->arg))->val.ival.type == T_Integer)
-                        {
-                            int val = ((A_Const*)(defElem->arg))->val.ival.ival;
-                            snprintf(arg, 256, "%d", val);
-                        }
-                        else
-                        {
-                            char *val = ((A_Const*)(defElem->arg))->val.sval.sval;
-                            int valLen = strlen(val);
-                            memcpy(arg, val, valLen);
-                            arg[valLen] = '\0';
-                        }
-                        argList = list_make2(mys_makeStringConst(pstrdup(defElem->defname), -1),
-                                             mys_makeStringConst(pstrdup(arg), -1));
-                        funcCall = (Node *) makeFuncCall(funcName,
-                                                         argList,
-                                                         COERCE_EXPLICIT_CALL,
-                                                         @1);
-                        target->name = NULL;
-                        target->indirection = NIL;
-                        target->val = funcCall;
-                        target->location = @1;
+                    n->kind = VAR_SET_VALUE;
+                    n->name = "mysql._set_transaction";
+                    n->args = $3;
+                    n->location = @1;
 
-                        result->targetList = lappend(result->targetList,
-                                                     ((Node *) target));
-                    }
-
-                    rt->assignments = list_make1(result);
-
-                    $$ = (Node *) rt;
+                    $$ = (Node *) n;
                 }
             | SET SESSION TRANSACTION transaction_mode_list
                 {
-                    MysVariableSetStmt *rt = makeNode(MysVariableSetStmt);
-                    SelectStmt *result = makeNode(SelectStmt);
-                    ListCell *lc;
-                    foreach(lc, $4)
-                    {
-                        ResTarget *target;
-                        Node *funcCall;
-                        List *funcName;
-                        List *argList;
-                        char arg[256];
-                        DefElem *defElem;
+                    VariableSetStmt *n = makeNode(VariableSetStmt);
 
-                        target = makeNode(ResTarget);
-                        funcName = list_make2(makeString(pstrdup("mysql")),
-                                              makeString(pstrdup("set_system_session_variable")));
-                        defElem = (DefElem *) lfirst(lc);
-                        if (((A_Const*)(defElem->arg))->val.ival.type == T_Integer)
-                        {
-                            int val = ((A_Const*)(defElem->arg))->val.ival.ival;
-                            snprintf(arg, 256, "%d", val);
-                        }
-                        else
-                        {
-                            char *val = ((A_Const*)(defElem->arg))->val.sval.sval;
-                            int valLen = strlen(val);
-                            memcpy(arg, val, valLen);
-                            arg[valLen] = '\0';
-                        }
-                        argList = list_make2(mys_makeStringConst(pstrdup(defElem->defname), -1),
-                                             mys_makeStringConst(pstrdup(arg), -1));
-                        funcCall = (Node *) makeFuncCall(funcName,
-                                                         argList,
-                                                         COERCE_EXPLICIT_CALL,
-                                                         @1);
-                        target->name = NULL;
-                        target->indirection = NIL;
-                        target->val = funcCall;
-                        target->location = @3;
+                    n->kind = VAR_SET_VALUE;
+                    n->name = "mysql._set_session_transaction";
+                    n->args = $4;
+                    n->location = @1;
 
-                        result->targetList = lappend(result->targetList,
-                                                     ((Node *) target));
-                    }
-
-                    rt->assignments = list_make1(result);
-
-                    $$ = (Node *) rt;
+                    $$ = (Node *) n;
                 }
             | SET GLOBAL TRANSACTION transaction_mode_list
                 {
-                    MysVariableSetStmt *rt = makeNode(MysVariableSetStmt);
-                    SelectStmt *result = makeNode(SelectStmt);
-                    ListCell *lc;
-                    foreach(lc, $4)
-                    {
-                        ResTarget *target;
-                        Node *funcCall;
-                        List *funcName;
-                        List *argList;
-                        char arg[256];
-                        DefElem *defElem;
+                    VariableSetStmt *n = makeNode(VariableSetStmt);
 
-                        target = makeNode(ResTarget);
-                        funcName = list_make2(makeString(pstrdup("mysql")),
-                                              makeString(pstrdup("set_system_global_variable")));
-                        defElem = (DefElem *) lfirst(lc);
-                        if (((A_Const*)(defElem->arg))->val.ival.type == T_Integer)
-                        {
-                            int val = ((A_Const*)(defElem->arg))->val.ival.ival;
-                            snprintf(arg, 256, "%d", val);
-                        }
-                        else
-                        {
-                            char *val = ((A_Const*)(defElem->arg))->val.sval.sval;
-                            int valLen = strlen(val);
-                            memcpy(arg, val, valLen);
-                            arg[valLen] = '\0';
-                        }
-                        argList = list_make2(mys_makeStringConst(pstrdup(defElem->defname), -1),
-                                             mys_makeStringConst(pstrdup(arg), -1));
-                        funcCall = (Node *) makeFuncCall(funcName,
-                                                         argList,
-                                                         COERCE_EXPLICIT_CALL,
-                                                         @1);
-                        target->name = NULL;
-                        target->indirection = NIL;
-                        target->val = funcCall;
-                        target->location = @3;
+                    n->kind = VAR_SET_VALUE;
+                    n->name = "mysql._set_global_transaction";
+                    n->args = $4;
+                    n->location = @1;
 
-                        result->targetList = lappend(result->targetList,
-                                                     ((Node *) target));
-                    }
-
-                    rt->assignments = list_make1(result);
-
-                    $$ = (Node *) rt;
+                    $$ = (Node *) n;
                 }
         ;
 
@@ -4036,63 +3925,25 @@ LockTables:
 LockUnLockStmt:
             LOCK_P Lock_Tables LockTables
                 {
-                    MysVariableSetStmt *rt;
-                    SelectStmt *result;
-                    ResTarget *target;
-                    Node *funcCall;
-                    List *funcName;
-                    List *argList;
+                    VariableSetStmt *n = makeNode(VariableSetStmt);
 
-                    rt = makeNode(MysVariableSetStmt);
-                    result = makeNode(SelectStmt);
-                    target = makeNode(ResTarget);
-                    target->name = NULL;
-                    target->indirection = NIL;
-                    funcName = list_make2(makeString(pstrdup("mysql")),
-                                          makeString(pstrdup("set_system_session_variable")));
-                    argList = list_make2(mys_makeStringConst(pstrdup("halo_mysql_dummy_stmt_return_ok"), -1),
-                                         mys_makeStringConst(pstrdup("1"), -1));
-                    funcCall = (Node *) makeFuncCall(funcName,
-                                                     argList,
-                                                     COERCE_EXPLICIT_CALL,
-                                                     @1);
-                    target->val = funcCall;
-                    target->location = -1;
-                    result->targetList = lappend(result->targetList,
-                                                 ((Node *) target));
-                    rt->assignments = list_make1(result);
+                    n->kind = VAR_SET_VALUE;
+                    n->name = "mysql._lock_tables";
+                    n->args = NIL;
+                    n->location = @1;
 
-                    $$ = (Node *) rt;
+                    $$ = (Node *) n;
                 }
             | UNLOCK TABLES
                 {
-                    MysVariableSetStmt *rt;
-                    SelectStmt *result;
-                    ResTarget *target;
-                    Node *funcCall;
-                    List *funcName;
-                    List *argList;
+                    VariableSetStmt *n = makeNode(VariableSetStmt);
 
-                    rt = makeNode(MysVariableSetStmt);
-                    result = makeNode(SelectStmt);
-                    target = makeNode(ResTarget);
-                    target->name = NULL;
-                    target->indirection = NIL;
-                    funcName = list_make2(makeString(pstrdup("mysql")),
-                                          makeString(pstrdup("set_system_session_variable")));
-                    argList = list_make2(mys_makeStringConst(pstrdup("halo_mysql_dummy_stmt_return_ok"), -1),
-                                         mys_makeStringConst(pstrdup("0"), -1));
-                    funcCall = (Node *) makeFuncCall(funcName,
-                                                     argList,
-                                                     COERCE_EXPLICIT_CALL,
-                                                     @1);
-                    target->val = funcCall;
-                    target->location = -1;
-                    result->targetList = lappend(result->targetList,
-                                                 ((Node *) target));
-                    rt->assignments = list_make1(result);
+                    n->kind = VAR_SET_VALUE;
+                    n->name = "mysql._unlock_tables";
+                    n->args = NIL;
+                    n->location = @1;
 
-                    $$ = (Node *) rt;
+                    $$ = (Node *) n;
                 }
 		;
 
@@ -24316,22 +24167,13 @@ mysqlMakeAdminTableSelect(List *relations, const char *operation)
 static Node *
 mysqlMakeAdminNoopStmt(void)
 {
-	MysVariableSetStmt *stmt = makeNode(MysVariableSetStmt);
-	SelectStmt *select = makeNode(SelectStmt);
-	ResTarget  *target = makeNode(ResTarget);
-	List	   *funcname;
-	List	   *args;
+	VariableSetStmt *n = makeNode(VariableSetStmt);
 
-	funcname = list_make2(makeString("mysql"),
-						  makeString("set_system_session_variable"));
-	args = list_make2(mys_makeStringConst("halo_mysql_dummy_stmt_return_ok", -1),
-					  mys_makeStringConst("1", -1));
-	target->val = (Node *) makeFuncCall(funcname, args,
-										COERCE_EXPLICIT_CALL, -1);
-	target->location = -1;
-	select->targetList = list_make1(target);
-	stmt->assignments = list_make1(select);
-	return (Node *) stmt;
+	n->kind = VAR_SET_VALUE;
+	n->name = "mysql._noop";
+	n->args = NIL;
+	n->location = -1;
+	return (Node *) n;
 }
 
 //static ResTarget *

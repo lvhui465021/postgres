@@ -161,7 +161,7 @@ mysql_before_simple_query_statement(Node *stmt)
 	}
 
 	/* SET itself only changes session state. */
-	if (IsA(stmt, MysVariableSetStmt))
+	if (IsA(stmt, VariableSetStmt))
 		return;
 
 	/*
@@ -671,7 +671,7 @@ mysql_process_command(int *command, StringInfo inBuf)
              * Intercept MySQL SET NAMES / SET CHARACTER SET commands.
              * These are sent by most MySQL drivers during connection
              * initialisation.  Our MySQL parser produces a
-             * MysVariableSetStmt which the PG18 utility path does not
+             * VariableSetStmt (mysql._ prefix) which the PG18 utility path does not
              * handle, so respond with a clean MySQL OK instead of
              * letting the query pipeline fail with "unrecognized node
              * type: 441".

@@ -227,7 +227,7 @@ mysUtilityCanPrepare(Node *parsetree)
 {
     switch (nodeTag(parsetree))
     {
-        case T_MysVariableSetStmt:
+        case T_VariableSetStmt:
         case T_MysSelectIntoStmt:
             return true;
         

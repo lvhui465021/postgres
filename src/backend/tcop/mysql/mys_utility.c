@@ -57,11 +57,17 @@
 #include "commands/user.h"
 #include "commands/vacuum.h"
 #include "commands/view.h"
+#include "executor/execExpr.h"
+#include "executor/executor.h"
 #include "executor/tstoreReceiver.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/mysql/mys_parsenodes.h"
+#include "nodes/nodeFuncs.h"
+#include "optimizer/optimizer.h"
 #include "parser/analyze.h"
+#include "parser/parse_coerce.h"
+#include "parser/parse_expr.h"
 #include "parser/parse_node.h"
 #include "parser/parse_utilcmd.h"
 #include "parser/parsereng.h"
@@ -216,7 +222,6 @@ ClassifyUtilityCommandAsReadOnly(Node *parsetree)
 		case T_PrepareStmt:
 		case T_UnlistenStmt:
 		case T_VariableSetStmt:
-		case T_MysVariableSetStmt:
 			return COMMAND_OK_IN_RECOVERY | COMMAND_OK_IN_READ_ONLY_TXN;
 
 		/* SELECT ... INTO @var reads a query result into session state. */
@@ -297,7 +302,7 @@ static void mys_ProcessUtilitySlow(ParseState *pstate,
                                    DestReceiver *dest,
                                    QueryCompletion *qc);
 static void mys_ExecDropStmt(DropStmt *stmt, bool isTopLevel);
-static void MysExecSetVariableStmt(ParseState *pstate, MysVariableSetStmt *parsetree, ParamListInfo params, bool isTopLevel);
+static void MysExecSetVariableStmt(ParseState *pstate, VariableSetStmt *n, ParamListInfo params, bool isTopLevel);
 static void MysExecSelectIntoStmt(ParseState *pstate, MysSelectIntoStmt *parsetree, ParamListInfo params, QueryCompletion *qc);
 static void MysValidateUseDatabase(VariableSetStmt *stmt);
 static bool MysSetAutocommitValue(Node *arg, bool *enabled);
@@ -637,13 +642,25 @@ mys_standard_ProcessUtility(PlannedStmt *pstmt,
 			break;
 
 		case T_VariableSetStmt:
-			MysValidateUseDatabase((VariableSetStmt *) parsetree);
-			ExecSetVariableStmt((VariableSetStmt *) parsetree, isTopLevel);
+			{
+				VariableSetStmt *n = (VariableSetStmt *) parsetree;
+
+				/*
+				 * MySQL-specific SET statements are encoded as
+				 * VariableSetStmt with a "mysql._" name prefix.
+				 */
+				if (n->name != NULL &&
+					strncmp(n->name, "mysql._", 7) == 0)
+				{
+					MysExecSetVariableStmt(pstate, n, params, isTopLevel);
+				}
+				else
+				{
+					MysValidateUseDatabase(n);
+					ExecSetVariableStmt(n, isTopLevel);
+				}
+			}
 			break;
-        
-        case T_MysVariableSetStmt:
-            MysExecSetVariableStmt(pstate, (MysVariableSetStmt *) parsetree, params, isTopLevel);
-            break;
         
         case T_MysSelectIntoStmt:
             MysExecSelectIntoStmt(pstate, (MysSelectIntoStmt *) parsetree, params, qc);
@@ -2169,11 +2186,11 @@ MysValidateUseDatabase(VariableSetStmt *stmt)
 }
 
 static void
-MysExecSetVariableStmt(ParseState *pstate, MysVariableSetStmt *parsetree, ParamListInfo params, bool isTopLevel)
+MysExecSetVariableStmt(ParseState *pstate, VariableSetStmt *n, ParamListInfo params, bool isTopLevel)
 {
     ListCell   *lc;
 
-    foreach(lc, parsetree->assignments)
+    foreach(lc, n->args)
     {
         Node *assignment = lfirst(lc);
         bool user_variable_assignment = false;
@@ -2205,18 +2222,114 @@ MysExecSetVariableStmt(ParseState *pstate, MysVariableSetStmt *parsetree, ParamL
 
         if (user_variable_assignment)
         {
-            MysSelectIntoStmt set_stmt = {0};
+            SelectStmt *select_stmt = castNode(SelectStmt, assignment);
+            ListCell   *target_cell;
 
             /*
-             * The grammar represents SET @var := expr as a one-row SELECT
-             * whose target is mys_set_user_var().  Execute it with a
-             * tuplestore receiver so the volatile setter runs, while keeping
-             * SET's normal OK-only wire response.
+             * Execute each user-variable assignment directly via the
+             * function manager, avoiding the transform/plan/execute
+             * pipeline that is sensitive to the outer ParseState layering
+             * introduced by the VariableSetStmt encoding.
              */
-            set_stmt.type = T_MysSelectIntoStmt;
-            set_stmt.selectStmt = assignment;
-            set_stmt.intoTarget = NULL;
-            MysExecSelectIntoStmt(pstate, &set_stmt, params, NULL);
+            foreach(target_cell, select_stmt->targetList)
+            {
+                ResTarget  *target = lfirst_node(ResTarget, target_cell);
+
+                if (IsA(target->val, FuncCall))
+                {
+                    FuncCall   *call = castNode(FuncCall, target->val);
+
+                    if (list_length(call->funcname) == 2 &&
+                        strcmp(strVal(linitial(call->funcname)), "pg_catalog") == 0 &&
+                        strcmp(strVal(lsecond(call->funcname)), "mys_set_user_var") == 0)
+                    {
+                        Node       *name_arg = (Node *) linitial(call->args);
+                        Node       *value_arg = (Node *) lsecond(call->args);
+                        char       *userVarName;
+                        Datum       value;
+                        bool        isNull = false;
+                        Oid         valTypeOid;
+                        int16       valTypLen;
+                        bool        valByVal;
+
+                        userVarName = mys_extract_user_var_name(name_arg);
+                        if (userVarName == NULL)
+                            ereport(ERROR,
+                                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                                     errmsg("SET target must be a user variable")));
+
+                        /*
+                         * Evaluate the expression through the normal
+                         * parse-analysis path to get a correctly typed
+                         * Datum, then store it directly.
+                         */
+                        {
+                            ParseState *set_pstate;
+                            Node       *xformed;
+                            Expr       *expr;
+                            ExprState  *estate;
+                            EState     *exec_state;
+                            bool        inner_isnull;
+                            Datum       inner_value;
+                            MemoryContext oldctx;
+
+                            set_pstate = make_parsestate(NULL);
+                            set_pstate->p_sourcetext =
+                                pstate->p_sourcetext;
+                            set_pstate->p_queryEnv = pstate->p_queryEnv;
+
+                            /*
+                             * Transform the expression; coerce if needed.
+                             */
+                            oldctx = MemoryContextSwitchTo(
+                                GetMemoryChunkContext(set_pstate));
+                            xformed = transformExpr(set_pstate, value_arg,
+                                                    EXPR_KIND_EXECUTE_PARAMETER);
+                            xformed = coerce_to_target_type(
+                                set_pstate, xformed,
+                                exprType(xformed),
+                                TEXTOID, -1,
+                                COERCION_EXPLICIT,
+                                COERCE_IMPLICIT_CAST,
+                                -1);
+                            MemoryContextSwitchTo(oldctx);
+
+                            if (xformed == NULL)
+                                ereport(ERROR,
+                                        (errcode(ERRCODE_CANNOT_COERCE),
+                                         errmsg("cannot coerce SET value to text")));
+
+                            /*
+                             * Fix and execute the expression to get a Datum.
+                             */
+                            expr = expression_planner((Expr *) xformed);
+                            fix_opfuncids((Node *) expr);
+
+                            estate = ExecInitExpr(expr, NULL);
+
+                            /*
+                             * ExecEvalExprSwitchContext requires an
+                             * ExprContext; obtain one from a throwaway
+                             * executor state.
+                             */
+                            exec_state = CreateExecutorState();
+                            inner_value = ExecEvalExprSwitchContext(
+                                estate, GetPerTupleExprContext(exec_state),
+                                &inner_isnull);
+
+                            value = inner_value;
+                            isNull = inner_isnull;
+                            valTypeOid = exprType((Node *) expr);
+                            get_typlenbyval(valTypeOid, &valTypLen, &valByVal);
+
+                            FreeExecutorState(exec_state);
+                            free_parsestate(set_pstate);
+                        }
+
+                        mysSetUserVarForPl(userVarName, value, valTypeOid, isNull);
+                    }
+                }
+            }
             continue;
         }
 

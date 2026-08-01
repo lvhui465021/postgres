@@ -57,7 +57,7 @@
 #include "commands/vacuum.h"
 #include "commands/view.h"
 #include "miscadmin.h"
-#include "nodes/mysql/mys_parsenodes.h"
+
 #include "parser/parse_utilcmd.h"
 #include "postmaster/bgwriter.h"
 #include "rewrite/rewriteDefine.h"
@@ -268,7 +268,6 @@ ClassifyUtilityCommandAsReadOnly(Node *parsetree)
 		case T_PrepareStmt:
 		case T_UnlistenStmt:
 		case T_VariableSetStmt:
-		case T_MysVariableSetStmt:
 			{
 				/*
 				 * These modify only backend-local state, so they're OK to run
@@ -2403,10 +2402,6 @@ CreateCommandTag(Node *parsetree)
 
 		case T_PLAssignStmt:
 			tag = CMDTAG_SELECT;
-			break;
-
-		case T_MysVariableSetStmt:
-			tag = CMDTAG_SET;
 			break;
 
 			/* utility statements --- same whether raw or cooked */
