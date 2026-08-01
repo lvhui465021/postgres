@@ -32,7 +32,6 @@
 #include "libpq/libpq.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
-#include "nodes/mysql/mys_parsenodes.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/optimizer.h"
 #include "parser/parsereng.h"

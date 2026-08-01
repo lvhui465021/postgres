@@ -17,7 +17,6 @@
 #define MYS_GRAMPARSE_H
 
 #include "nodes/parsenodes.h"
-#include "nodes/mysql/mys_parsenodes.h"
 #include "parser/mysql/mys_scanner.h"
 
 /* MUST INCLUDE AFTER mys_scanner.h */

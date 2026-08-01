@@ -3,7 +3,6 @@
 #include "nodes/nodeFuncs.h"
 #include "nodes/pg_list.h"
 #include "nodes/value.h"
-#include "nodes/mysql/mys_parsenodes.h"
 #include "commands/mysql/mys_uservar.h"
 #include "parser/parserapi.h"
 #include "parser/parse_coerce.h"

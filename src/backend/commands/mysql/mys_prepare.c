@@ -18,7 +18,6 @@
 #include "commands/mysql/mys_uservar.h"
 #include "commands/prepare.h"
 #include "mb/pg_wchar.h"
-#include "nodes/mysql/mys_parsenodes.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/nodes.h"
 #include "nodes/pg_list.h"
@@ -228,7 +227,6 @@ mysUtilityCanPrepare(Node *parsetree)
     switch (nodeTag(parsetree))
     {
         case T_VariableSetStmt:
-        case T_MysSelectIntoStmt:
             return true;
         
         case T_CreateStmt:

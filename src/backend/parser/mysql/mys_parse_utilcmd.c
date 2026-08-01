@@ -51,7 +51,6 @@
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/parsenodes.h"
-#include "nodes/mysql/mys_parsenodes.h"
 #include "optimizer/optimizer.h"
 #include "parser/analyze.h"
 #include "parser/parse_node.h"
@@ -5637,7 +5636,6 @@ transformPartitionCmd(CreateStmtContext *cxt, PartitionCmd *cmd)
 	}
 }
 
-static Query *transformMysSelectIntoStmt(ParseState *pstate, MysSelectIntoStmt *stmt);
 static List *resolve_unique_index_expr(ParseState *pstate, InferClause *infer,
 									   Relation heapRel);
 
@@ -5662,7 +5660,8 @@ mys_transformOptionalSelectInto(ParseState *pstate, Node *parseTree)
 
 		if (stmt->intoClause != NULL)
 		{
-			MysSelectIntoStmt *into_stmt = makeNode(MysSelectIntoStmt);
+			VariableSetStmt *set_stmt = makeNode(VariableSetStmt);
+			Query	   *result = makeNode(Query);
 			ListCell   *lc;
 
 			/*
@@ -5678,32 +5677,29 @@ mys_transformOptionalSelectInto(ParseState *pstate, Node *parseTree)
 							 errmsg("SELECT INTO target must be a user variable")));
 			}
 
-			into_stmt->selectStmt = parseTree;
-			into_stmt->intoTarget = (Node *) stmt->intoClause->colNames;
-			into_stmt->location = -1;
+			/*
+			 * Encode SELECT ... INTO @var as a standard VariableSetStmt
+			 * carrying a "mysql._" name prefix; the MySQL process_utility
+			 * handler recognizes the prefix and executes the wrapped query
+			 * into the user variables.  args[0] holds the SELECT tree,
+			 * args[1] the list of INTO targets.
+			 */
+			set_stmt->kind = VAR_SET_VALUE;
+			set_stmt->name = "mysql._select_into";
+			set_stmt->args = list_make2(parseTree,
+										(Node *) stmt->intoClause->colNames);
+			set_stmt->location = -1;
 			stmt->intoClause = NULL;
 
-			return transformMysSelectIntoStmt(pstate, into_stmt);
+			result->commandType = CMD_UTILITY;
+			result->utilityStmt = (Node *) set_stmt;
+			result->querySource = QSRC_ORIGINAL;
+			result->canSetTag = true;
+			return result;
 		}
 	}
 
 	return transformStmt(pstate, parseTree);
-}
-
-/*
- * transformMysSelectIntoStmt
- *
- * Build a CMD_UTILITY Query wrapping a MysSelectIntoStmt.
- */
-static Query *
-transformMysSelectIntoStmt(ParseState *pstate, MysSelectIntoStmt *stmt)
-{
-	Query *result = makeNode(Query);
-	result->commandType = CMD_UTILITY;
-	result->utilityStmt = (Node *) stmt;
-	result->querySource = QSRC_ORIGINAL;
-	result->canSetTag = true;
-	return result;
 }
 
 /*

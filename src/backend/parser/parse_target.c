@@ -28,7 +28,6 @@
 #include "parser/parse_type.h"
 #include "parser/parsetree.h"
 #include "parser/parserapi.h"
-#include "nodes/mysql/mys_parsenodes.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"

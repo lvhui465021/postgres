@@ -23,7 +23,6 @@
 #include "executor/mys_nodeModifyTable.h"
 #include "foreign/fdwapi.h"
 #include "mb/pg_wchar.h"
-#include "nodes/mysql/mys_parsenodes.h"
 #include "nodes/mysql/mys_execnodes.h"
 #include "partitioning/partbounds.h"
 #include "partitioning/partdesc.h"

@@ -62,7 +62,6 @@
 #include "executor/tstoreReceiver.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
-#include "nodes/mysql/mys_parsenodes.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/optimizer.h"
 #include "parser/analyze.h"
@@ -222,11 +221,15 @@ ClassifyUtilityCommandAsReadOnly(Node *parsetree)
 		case T_PrepareStmt:
 		case T_UnlistenStmt:
 		case T_VariableSetStmt:
-			return COMMAND_OK_IN_RECOVERY | COMMAND_OK_IN_READ_ONLY_TXN;
+			{
+				VariableSetStmt *n = (VariableSetStmt *) parsetree;
 
-		/* SELECT ... INTO @var reads a query result into session state. */
-		case T_MysSelectIntoStmt:
-			return COMMAND_IS_STRICTLY_READ_ONLY;
+				/* SELECT ... INTO @var reads a query result into session state. */
+				if (n->name != NULL &&
+					strcmp(n->name, "mysql._select_into") == 0)
+					return COMMAND_IS_STRICTLY_READ_ONLY;
+				return COMMAND_OK_IN_RECOVERY | COMMAND_OK_IN_READ_ONLY_TXN;
+			}
 
 		case T_ClusterStmt:
 		case T_ReindexStmt:
@@ -303,7 +306,7 @@ static void mys_ProcessUtilitySlow(ParseState *pstate,
                                    QueryCompletion *qc);
 static void mys_ExecDropStmt(DropStmt *stmt, bool isTopLevel);
 static void MysExecSetVariableStmt(ParseState *pstate, VariableSetStmt *n, ParamListInfo params, bool isTopLevel);
-static void MysExecSelectIntoStmt(ParseState *pstate, MysSelectIntoStmt *parsetree, ParamListInfo params, QueryCompletion *qc);
+static void MysExecSelectIntoStmt(ParseState *pstate, VariableSetStmt *parsetree, ParamListInfo params, QueryCompletion *qc);
 static void MysValidateUseDatabase(VariableSetStmt *stmt);
 static bool MysSetAutocommitValue(Node *arg, bool *enabled);
 static bool MysApplyAutocommitAssignment(Node *assignment);
@@ -652,7 +655,10 @@ mys_standard_ProcessUtility(PlannedStmt *pstmt,
 				if (n->name != NULL &&
 					strncmp(n->name, "mysql._", 7) == 0)
 				{
-					MysExecSetVariableStmt(pstate, n, params, isTopLevel);
+					if (strcmp(n->name, "mysql._select_into") == 0)
+						MysExecSelectIntoStmt(pstate, n, params, qc);
+					else
+						MysExecSetVariableStmt(pstate, n, params, isTopLevel);
 				}
 				else
 				{
@@ -661,10 +667,6 @@ mys_standard_ProcessUtility(PlannedStmt *pstmt,
 				}
 			}
 			break;
-        
-        case T_MysSelectIntoStmt:
-            MysExecSelectIntoStmt(pstate, (MysSelectIntoStmt *) parsetree, params, qc);
-            break;
 
 		case T_VariableShowStmt:
 			{
@@ -2252,7 +2254,23 @@ MysExecSetVariableStmt(ParseState *pstate, VariableSetStmt *n, ParamListInfo par
                         int16       valTypLen;
                         bool        valByVal;
 
-                        userVarName = mys_extract_user_var_name(name_arg);
+                        /*
+                         * The MySQL grammar encodes the SET target as a
+                         * plain string constant
+                         * (pg_catalog.mys_set_user_var('name', value));
+                         * the SELECT-form degradation wraps it in
+                         * mys_get_user_var('name').  Accept both.
+                         */
+                        userVarName = NULL;
+                        if (IsA(name_arg, A_Const))
+                        {
+                            A_Const *ac = castNode(A_Const, name_arg);
+
+                            if (!ac->isnull && ac->val.node.type == T_String)
+                                userVarName = pstrdup(ac->val.sval.sval);
+                        }
+                        if (userVarName == NULL)
+                            userVarName = mys_extract_user_var_name(name_arg);
                         if (userVarName == NULL)
                             ereport(ERROR,
                                     (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -2346,7 +2364,7 @@ MysExecSetVariableStmt(ParseState *pstate, VariableSetStmt *n, ParamListInfo par
 }
 
 static void
-MysExecSelectIntoStmt(ParseState *pstate, MysSelectIntoStmt *parsetree, ParamListInfo params, QueryCompletion *qc)
+MysExecSelectIntoStmt(ParseState *pstate, VariableSetStmt *parsetree, ParamListInfo params, QueryCompletion *qc)
 {
     SelectStmt *rawStmt;
     Query	   *query;
@@ -2358,7 +2376,7 @@ MysExecSelectIntoStmt(ParseState *pstate, MysSelectIntoStmt *parsetree, ParamLis
     List	   *targets;
 
     /* Parse-analyze the raw SelectStmt to get a Query */
-    rawStmt = (SelectStmt *) parsetree->selectStmt;
+    rawStmt = castNode(SelectStmt, linitial(parsetree->args));
     query = transformStmt(pstate, (Node *) rawStmt);
     Assert(query->commandType == CMD_SELECT);
 
@@ -2386,9 +2404,15 @@ MysExecSelectIntoStmt(ParseState *pstate, MysSelectIntoStmt *parsetree, ParamLis
 
     /*
      * Use a snapshot with an updated command ID to ensure this query sees
-     * results of any previously executed queries.
+     * results of any previously executed queries.  Encoded as a standard
+     * VariableSetStmt, the portal layer does not establish an active
+     * snapshot for us (as it did for the former custom MysSelectIntoStmt
+     * node), so create one when none is set.
      */
-    PushCopiedSnapshot(GetActiveSnapshot());
+    if (ActiveSnapshotSet())
+        PushCopiedSnapshot(GetActiveSnapshot());
+    else
+        PushActiveSnapshot(GetTransactionSnapshot());
     UpdateActiveSnapshotCommandId();
 
     /* Create a QueryDesc, redirecting output to our tuple receiver */
@@ -2402,7 +2426,7 @@ MysExecSelectIntoStmt(ParseState *pstate, MysSelectIntoStmt *parsetree, ParamLis
     /* run the plan to completion */
     ExecutorRun(queryDesc, ForwardScanDirection, 0L);
 
-    targets = (List *) parsetree->intoTarget;
+    targets = (List *) lsecond(parsetree->args);
 
     if (tuplestore_tuple_count(tupleStore) > 1)
     {

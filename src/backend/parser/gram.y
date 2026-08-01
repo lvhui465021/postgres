@@ -57,7 +57,6 @@
 #include "gramparse.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
-#include "nodes/mysql/mys_parsenodes.h"
 #include "parser/parser.h"
 #include "utils/datetime.h"
 #include "utils/xml.h"

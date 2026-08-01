@@ -74,7 +74,6 @@ my @all_input_files = qw(
   nodes/supportnodes.h
   nodes/value.h
   utils/rel.h
-  nodes/mysql/mys_parsenodes.h
 );
 
 # Nodes from these input files are automatically treated as nodetag_only.
