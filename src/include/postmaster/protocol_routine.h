@@ -110,6 +110,17 @@ extern void   RegisterProtocolRoutine(const ProtocolRoutine *routine);
 extern bool   CompatibilityProtocolKindIsValid(CompatibilityProtocolKind kind);
 
 /*
+ * ListenProtocolServerPort -- open a listener socket for a registered
+ * protocol kind on the given address/port.  Called by the postmaster for
+ * built-in protocols and by loadable modules (via listen_init_hook) for
+ * compatibility listeners such as MySQL; exported so modules can open
+ * their listener from the postmaster's address space.
+ */
+extern int  ListenProtocolServerPort(CompatibilityProtocolKind kind, int family,
+									 const char *hostName, unsigned short portNumber,
+									 const char *unixSocketName);
+
+/*
  * listen_init_hook -- invoked during postmaster startup so that additional
  * wire-protocol listeners (MySQL, TDS, ...) can register their protocol
  * routine and open their listener socket.  Built-in protocols are started

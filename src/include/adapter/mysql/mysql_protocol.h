@@ -12,7 +12,6 @@
 #ifndef MYSQL_PROTOCOL_H
 #define MYSQL_PROTOCOL_H
 
-extern void InitMySQLProtocolRoutine(void);
 extern struct ProtocolRoutine MySQLProtocolRoutine;
 
 #endif   /* MYSQL_PROTOCOL_H */

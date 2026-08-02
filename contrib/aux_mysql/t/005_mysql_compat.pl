@@ -64,7 +64,7 @@ $node->append_conf('postgresql.conf', "listen_addresses = '127.0.0.1'");
 # mysm registers the MySQL ADT method table in _PG_init; it must be
 # preloaded so InitADTExt() dispatches MySQL type semantics in every
 # backend from session start.
-$node->append_conf('postgresql.conf', "shared_preload_libraries = 'mysm, mysql_parser'");
+$node->append_conf('postgresql.conf', "shared_preload_libraries = 'mysql_parser, mysm, aux_mysql'");
 $node->restart;
 sleep 1;
 

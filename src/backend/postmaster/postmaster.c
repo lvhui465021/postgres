@@ -123,7 +123,6 @@
 #include "utils/pidfile.h"
 #include "utils/timestamp.h"
 #include "utils/varlena.h"
-#include "adapter/mysql/mysql_protocol.h"
 
 #ifdef EXEC_BACKEND
 #include "common/file_utils.h"
@@ -456,11 +455,10 @@ static void StartSysLogger(void);
 static void StartAutovacuumWorker(void);
 static bool StartBackgroundWorker(RegisteredBgWorker *rw);
 static void InitPostmasterDeathWatchHandle(void);
-static int  ListenProtocolServerPort(CompatibilityProtocolKind kind, int family,
-                                      const char *hostName, unsigned short portNumber,
-                                      const char *unixSocketName);
+int  ListenProtocolServerPort(CompatibilityProtocolKind kind, int family,
+                              const char *hostName, unsigned short portNumber,
+                              const char *unixSocketName);
 static void InitializeProtocolListeners(void);
-
 #ifdef WIN32
 #define WNOHANG 0				/* ignored, so any integer value will do */
 
@@ -1461,43 +1459,14 @@ ListenProtocolServerPort(CompatibilityProtocolKind kind, int family,
 static void
 InitializeProtocolListeners(void)
 {
-	/* Register MySQL protocol routine so COMPAT_PROTOCOL_MYSQL can resolve. */
-	InitMySQLProtocolRoutine();
-
-	/* Let extensions start additional protocol listeners. */
+	/*
+	 * Built-in protocol listeners are opened directly above.  Loadable
+	 * compatibility listeners (MySQL, TDS, ...) register their protocol
+	 * routine and open their listener socket here via listen_init_hook;
+	 * the MySQL listener moved to the aux_mysql module.
+	 */
 	if (listen_init_hook != NULL)
 		listen_init_hook();
-
-	/* Open the MySQL TCP listener when enabled.  (Unix socket deferred.) */
-	if (mysql_listener_on)
-	{
-		char	   *addresses;
-		List	   *elemlist;
-		ListCell   *l;
-		bool		success = false;
-
-		addresses = pstrdup(GetConfigOption("listen_addresses", false, false));
-		if (!SplitIdentifierString(pstrdup(addresses), ',', &elemlist))
-			ereport(FATAL,
-					(errmsg("invalid list syntax for \"listen_addresses\"")));
-
-		foreach(l, elemlist)
-		{
-			char   *curhost = (char *) lfirst(l);
-
-			if (ListenProtocolServerPort(COMPAT_PROTOCOL_MYSQL, AF_UNSPEC,
-									 curhost, (unsigned short) mysql_port,
-									 NULL) == STATUS_OK)
-				success = true;
-		}
-
-		list_free_deep(elemlist);
-		pfree(addresses);
-
-		if (!success)
-			ereport(LOG,
-					(errmsg("could not create MySQL listener on any address")));
-	}
 }
 
 /*

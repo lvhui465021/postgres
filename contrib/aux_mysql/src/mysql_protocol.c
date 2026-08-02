@@ -25,6 +25,7 @@
 #include "adapter/mysql/mysql_packet.h"
 #include "adapter/mysql/mysql_protocol.h"
 #include "adapter/mysql/mysql_stmt.h"
+#include "adapter/mysql/mys_session_state_exports.h"
 #include "adapter/mysql/systemVar.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
@@ -1460,57 +1461,38 @@ ProtocolRoutine MySQLProtocolRoutine = {
     .process_utility = mys_standard_ProcessUtility,
 
     /*
-     * parser_routine is filled at postmaster startup from the registered
-     * dialect table (see InitMySQLProtocolRoutine): the MySQL parser
-     * ships as a loadable module, so it cannot be referenced here.
+     * parser_routine is filled at module load (see aux_mysql_init.c
+     * _PG_init): the MySQL parser ships as a loadable module, so it
+     * cannot be referenced here.
      */
 };
 
-/* ----------------------------------------------------------------
- *    Registration (called at postmaster startup)
- * ----------------------------------------------------------------
+/*
+ * G3 getters for the kernel SQL helpers (mys_found_rows etc.): report
+ * the current connection's packet state.  Published through
+ * mys_session_state_exports by _PG_init (aux_mysql_init.c).
  */
-void
-InitMySQLProtocolRoutine(void)
+static uint64
+mys_session_found_rows(void)
 {
-    /*
-     * Bind the loadable MySQL parser at startup: raw-parse dispatch in
-     * PostgresMain() reads protocol_routine->parser_routine, and the
-     * kernel cannot reference mysql_parser.so symbols at link time.
-     */
-    MySQLProtocolRoutine.parser_routine =
-        GetRegisteredParserRoutine(COMPAT_PROTOCOL_MYSQL);
-
-    RegisterProtocolRoutine(&MySQLProtocolRoutine);
-
-    /* Register MySQL's CTAS post-hook so backends inherit it. */
-    InitMysCtasHook();
+	return mysql_packet_get_found_rows(mysql_ps());
 }
 
-/* ----------------------------------------------------------------
- *    SQL-callable helpers (registered in pg_proc.dat)
- * ----------------------------------------------------------------
- */
-PG_FUNCTION_INFO_V1(mys_found_rows);
-
-Datum
-mys_found_rows(PG_FUNCTION_ARGS)
+static uint64
+mys_session_last_insert_id(void)
 {
-	PG_RETURN_INT64((int64) mysql_packet_get_found_rows(mysql_ps()));
+	return mysql_packet_get_last_insert_id(mysql_ps());
 }
 
-PG_FUNCTION_INFO_V1(mys_last_insert_id);
-
-Datum
-mys_last_insert_id(PG_FUNCTION_ARGS)
+static uint64
+mys_session_row_count(void)
 {
-	PG_RETURN_INT64((int64) mysql_packet_get_last_insert_id(mysql_ps()));
+	return mysql_packet_get_row_count(mysql_ps());
 }
 
-PG_FUNCTION_INFO_V1(mys_row_count);
-
-Datum
-mys_row_count(PG_FUNCTION_ARGS)
-{
-	PG_RETURN_INT64((int64) mysql_packet_get_row_count(mysql_ps()));
-}
+/* Published to the kernel via mys_session_state_exports (see below). */
+MysSessionStateExports mys_session_state_exports_data = {
+	.found_rows = mys_session_found_rows,
+	.last_insert_id = mys_session_last_insert_id,
+	.row_count = mys_session_row_count,
+};

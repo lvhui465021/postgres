@@ -569,11 +569,11 @@ int			temp_file_limit = -1;
 int			num_temp_buffers = 1024;
 
 char	   *cluster_name = "";
+char	   *mysql_server_version = "8.4.10-openhalo-1.0";
 char	   *mysql_backend_database = "postgres";
 bool		mysql_listener_on = false;
 int			mysql_port = 3306;
 int			mysql_max_allowed_packet = 64 * 1024 * 1024;
-char	   *mysql_server_version = "8.4.10-openhalo-1.0";
 char	   *ConfigFileName;
 char	   *HbaFileName;
 char	   *IdentFileName;
@@ -2549,7 +2549,6 @@ struct config_int ConfigureNamesInt[] =
 		DEF_PGPORT, 1, 65535,
 		NULL, NULL, NULL
 	},
-
 	{
 		{"mysql_port", PGC_POSTMASTER, CONN_AUTH_SETTINGS,
 			gettext_noop("Sets the TCP port for the MySQL compatibility listener."),

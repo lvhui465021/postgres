@@ -1449,7 +1449,7 @@ setup_config(void)
 		conflines = replace_guc_value(conflines, "database_compat_mode",
 									  "mysql", false);
 		conflines = replace_guc_value(conflines, "shared_preload_libraries",
-									  "mysm, mysql_parser", false);
+									  "mysql_parser, mysm, aux_mysql", false);
 	}
 
 	/* ... and write out the finished postgresql.conf file */
