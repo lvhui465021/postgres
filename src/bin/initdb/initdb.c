@@ -1439,17 +1439,19 @@ setup_config(void)
 	if (mysql_mode)
 	{
 		/*
-		 * MySQL compatibility mode: pin the cluster dialect and preload
-		 * the mysm and mysql_parser shared libraries so the ADT method
-		 * table and the MySQL dialect parser are registered before any
-		 * backend initializes.  Without the preload, a session whose
-		 * first query is a date/time literal or MySQL syntax falls back
-		 * to standard PostgreSQL semantics.
+		 * MySQL compatibility mode: pin the cluster dialect, preload the
+		 * mysql_parser/mysm/aux_mysql shared libraries so the parser, ADT
+		 * table and protocol listener are registered before any backend
+		 * initializes, and enable the MySQL listener so the compatibility
+		 * mode is usable out of the box (the standard PG listener stays
+		 * active alongside it).
 		 */
 		conflines = replace_guc_value(conflines, "database_compat_mode",
 									  "mysql", false);
 		conflines = replace_guc_value(conflines, "shared_preload_libraries",
 									  "mysql_parser, mysm, aux_mysql", false);
+		conflines = replace_guc_value(conflines, "mysql_listener_on",
+									  "true", false);
 	}
 
 	/* ... and write out the finished postgresql.conf file */
