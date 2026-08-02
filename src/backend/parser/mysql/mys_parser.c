@@ -15,15 +15,30 @@
  */
 #include "postgres.h"
 
+/*
+ * The MySQL grammar interface is included early: the generated mys_gram.h
+ * declares a bison token (MYS_ENGINE) that would collide with OpenSSL's
+ * ENGINE type pulled in by headers below (fmgr.h / libpq-be.h via
+ * parsereng.h).  The token was renamed to avoid the clash, and keeping
+ * this include first preserves that invariant.
+ */
+#include "parser/mysql/mys_gramparse.h"
+
+#include "fmgr.h"                  /* PG_MODULE_MAGIC */
 #include "mb/pg_wchar.h"
 #include "parser/parser.h"
+#include "parser/parsereng.h"      /* RegisterParserRoutine */
 #include "parser/scansup.h"
-#include "parser/mysql/mys_gramparse.h"
+#include "parser/mysql/mys_expr_transform.h"
+#include "parser/mysql/mys_parse_utilcmd.h"
 #include "parser/mysql/mys_parser.h"
+#include "parser/mysql/mys_parser_exports.h"
 #include "parser/mysql/mys_scanner.h"
 
 /* in mys_keywords.c -- generated keyword token map */
 #include "parser/mysql/mys_keywords.h"
+
+PG_MODULE_MAGIC;
 
 /* Save previous token for BINARY/REGEXP lookahead */
 static int prev_token;
@@ -462,4 +477,49 @@ mys_raw_parser(const char *str, RawParseMode mode)
 	}
 
 	return result;
+}
+
+/*
+ * MySQLParserRoutine
+ *
+ * The dialect vtable exposed to the kernel through RegisterParserRoutine()
+ * in _PG_init.  It lives here so the MySQL parser can ship as a loadable
+ * module (mysql_parser.so) instead of being compiled into the backend;
+ * see parsereng.h and the mysm module for the same pattern.
+ */
+const ParserRoutine MySQLParserRoutine = {
+	.raw_parse = mys_raw_parser,
+	.transformOptionalSelectInto = mys_transformOptionalSelectInto,
+	.transformOnConflictArbiter = mys_transformOnConflictArbiter,
+	.transform_expr_node = mys_transform_expr_node,
+	.figure_colname = mys_figure_colname,
+};
+
+/*
+ * G3 exports: kernel-facing entry points into this module.  The kernel
+ * cannot link against the module's symbols, so it calls through this
+ * table; the slot is defined in the kernel and filled here at load time.
+ */
+MysParserExports mys_parser_exports_data = {
+	.mys_transformCreateStmt = mys_transformCreateStmt,
+	.mys_transformAlterTableStmt = mys_transformAlterTableStmt,
+	.mys_expandTableLikeClause = mys_expandTableLikeClause,
+	.getCurrentNamespaceOid = getCurrentNamespaceOid,
+	.createAutoIncrementTriggerFunc = createAutoIncrementTriggerFunc,
+	.createAutoUpdateTimeStampTriggerFunc = createAutoUpdateTimeStampTriggerFunc,
+	.createAutoUpdateTimeStampTrigger = createAutoUpdateTimeStampTrigger,
+	.MysScanKeywords = &MysScanKeywords,
+	.MysScanKeywordCategories = MysScanKeywordCategories,
+};
+
+/*
+ * Module load hook: register the MySQL dialect parser and publish the
+ * kernel-facing exports.  The kernel dispatches by MyCompatMode in
+ * InitParserEngine().
+ */
+void
+_PG_init(void)
+{
+	RegisterParserRoutine(COMPAT_PROTOCOL_MYSQL, &MySQLParserRoutine);
+	mys_parser_exports = &mys_parser_exports_data;
 }

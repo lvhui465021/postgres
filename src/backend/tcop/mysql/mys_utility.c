@@ -71,6 +71,7 @@
 #include "parser/parse_utilcmd.h"
 #include "parser/parsereng.h"
 #include "parser/mysql/mys_parse_utilcmd.h"
+#include "parser/mysql/mys_parser_exports.h"
 #include "postmaster/bgwriter.h"
 #include "rewrite/rewriteDefine.h"
 #include "rewrite/rewriteHandler.h"
@@ -85,7 +86,6 @@
 /* extern declarations for functions from other MySQL modules */
 extern void mys_PrepareQuery(ParseState *pstate, PrepareStmt *stmt,
 							 int stmt_location, int stmt_len);
-extern List *mys_expandTableLikeClause(RangeVar *table_rv, TableLikeClause *like);
 
 /*
  * CheckRestrictedOperation: throw error for hazardous command if we're
@@ -929,8 +929,9 @@ mys_ProcessUtilitySlow(ParseState *pstate,
 					RangeVar   *table_rv = NULL;
 
 					/* Run parse analysis ... */
-					stmts = mys_transformCreateStmt((CreateStmt *) parsetree,
-													  queryString);
+					stmts = mys_parser_exports->mys_transformCreateStmt(
+														(CreateStmt *) parsetree,
+														queryString);
 
 					/*
 					 * ... and do it.  We can't use foreach() because we may
@@ -1038,7 +1039,7 @@ mys_ProcessUtilitySlow(ParseState *pstate,
 
 							Assert(table_rv != NULL);
 
-							morestmts = mys_expandTableLikeClause(table_rv, like);
+							morestmts = mys_parser_exports->mys_expandTableLikeClause(table_rv, like);
 							stmts = list_concat(morestmts, stmts);
 						}
 						else

@@ -14,9 +14,7 @@
 #include "parser/parser.h"            /* raw_parser, RawParseMode    */
 #include "parser/parserapi.h"         /* ParserRoutine               */
 #include "parser/parsereng.h"
-#include "parser/mysql/mys_parse_utilcmd.h"
-#include "parser/mysql/mys_parser.h"  /* mys_raw_parser              */
-#include "parser/mysql/mys_expr_transform.h"  /* mys_transform_expr_node */
+#include "parser/mysql/mys_parser_exports.h"
 
 #include "miscadmin.h"
 #include "libpq/libpq-be.h"
@@ -57,6 +55,13 @@ RegisterParserRoutine(CompatibilityProtocolKind kind,
 CompatibilityProtocolKind MyCompatMode = COMPAT_PROTOCOL_POSTGRES;
 
 /*
+ * G3 cross-boundary slot: kernel-facing entry points of the loadable
+ * mysql_parser module.  NULL until the module's _PG_init() fills it in;
+ * see mys_parser_exports.h.
+ */
+MysParserExports *mys_parser_exports = NULL;
+
+/*
  * InitCompatMode
  *
  * Resolves the backend's dialect before the parser engine and ADT
@@ -66,13 +71,6 @@ CompatibilityProtocolKind MyCompatMode = COMPAT_PROTOCOL_POSTGRES;
 void
 InitCompatMode(void)
 {
-	/*
-	 * Register the built-in MySQL parser table on first use.  This is the
-	 * dynamic-registration seam that a loadable parser library would also
-	 * use; the kernel dispatches by MyCompatMode in InitParserEngine().
-	 */
-	RegisterParserRoutine(COMPAT_PROTOCOL_MYSQL, &MySQLParserRoutine);
-
 	if (MyProcPort != NULL)
 		MyCompatMode = MyProcPort->protocol_kind;
 	else
@@ -89,31 +87,42 @@ static const ParserRoutine StandardParserRoutine = {
     .transform_expr_node = NULL,
 };
 
-/*
- * MySQLParserRoutine  –  MySQL-compatibility dialect.
- *
- * Initial M2 state: mys_raw_parser delegates to the standard PG
- * raw_parser.  The dedicated MySQL scanner (mys_scan.l) and grammar
- * (mys_gram.y) will replace this delegation incrementally.
- */
-const ParserRoutine MySQLParserRoutine = {
-	.raw_parse = mys_raw_parser,
-	.transformOptionalSelectInto = mys_transformOptionalSelectInto,
-	.transformOnConflictArbiter = mys_transformOnConflictArbiter,
-    .transform_expr_node = mys_transform_expr_node,
-	.figure_colname = mys_figure_colname,
-};
-
 const ParserRoutine *
 GetStandardParserRoutine(void)
 {
     return &StandardParserRoutine;
 }
 
+/*
+ * GetDialectParserRoutine
+ *
+ * Return the ParserRoutine for the backend's active dialect, falling back
+ * to the standard PG parser when no dialect table is registered (for
+ * example, when the mysql_parser module was not loaded).  The raw-parse
+ * dispatch in PostgresMain() uses this instead of a compile-time
+ * ProtocolRoutine binding so the parser can ship as a loadable module.
+ */
 const ParserRoutine *
-GetMySQLParserRoutine(void)
+GetDialectParserRoutine(void)
 {
-    return &MySQLParserRoutine;
+	const ParserRoutine *routine = dialect_parser[MyCompatMode];
+
+	return routine != NULL ? routine : GetStandardParserRoutine();
+}
+
+/*
+ * GetRegisteredParserRoutine
+ *
+ * Return the ParserRoutine registered for a dialect kind, or NULL if
+ * none (for example, when the mysql_parser module was not loaded).
+ * Used by the protocol layer to bind the parser for its connections
+ * at postmaster startup.
+ */
+const ParserRoutine *
+GetRegisteredParserRoutine(CompatibilityProtocolKind kind)
+{
+	Assert(kind >= 0 && kind < COMPAT_PROTOCOL_KIND_MAX);
+	return dialect_parser[kind];
 }
 
 /*

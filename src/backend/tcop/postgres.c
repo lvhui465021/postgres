@@ -5026,6 +5026,12 @@ PostgresMain(const char *dbname, const char *username)
 
 					query_string = pq_getmsgstring(&input_message);
 					pq_getmsgend(&input_message);
+					/*
+					 * Dialect parser is bound to the connection's protocol
+					 * at startup (ProtocolRoutine.parser_routine); PG and
+					 * bootstrap connections fall back to the standard
+					 * parser.
+					 */
 					protocol_routine = GetCurrentProtocolRoutine();
 					parser_routine = protocol_routine != NULL &&
 						protocol_routine->parser_routine != NULL ?

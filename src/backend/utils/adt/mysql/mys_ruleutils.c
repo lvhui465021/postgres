@@ -12,7 +12,7 @@
 #include "postgres.h"
 
 #include "common/keywords.h"
-#include "parser/mysql/mys_keywords.h"
+#include "parser/mysql/mys_parser_exports.h"
 #include "utils/builtins.h"
 #include "utils/mysql/mys_ruleutils.h"
 
@@ -68,9 +68,11 @@ mys_quote_identifier(const char *ident)
 		 * Note: ScanKeywordLookup() does case-insensitive comparison, but
 		 * that's fine, since we already know we have all-lower-case.
 		 */
-		int			kwnum = ScanKeywordLookup(ident, &MysScanKeywords);
+		int			kwnum = ScanKeywordLookup(ident,
+											  mys_parser_exports->MysScanKeywords);
 
-		if (kwnum >= 0 && MysScanKeywordCategories[kwnum] != UNRESERVED_KEYWORD)
+		if (kwnum >= 0 &&
+			mys_parser_exports->MysScanKeywordCategories[kwnum] != UNRESERVED_KEYWORD)
 			safe = false;
 	}
 

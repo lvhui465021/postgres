@@ -22,7 +22,8 @@ typedef enum
 } DatabaseCompatModeType;
 
 extern const struct ParserRoutine *GetStandardParserRoutine(void);
-extern const struct ParserRoutine *GetMySQLParserRoutine(void);
+extern const struct ParserRoutine *GetDialectParserRoutine(void);
+extern const struct ParserRoutine *GetRegisteredParserRoutine(CompatibilityProtocolKind kind);
 extern void InitCompatMode(void);
 extern void InitParserEngine(void);
 
@@ -40,9 +41,6 @@ extern void RegisterParserRoutine(CompatibilityProtocolKind kind,
 
 /* Backend-level dialect context (protocol override or cluster default). */
 extern CompatibilityProtocolKind MyCompatMode;
-
-/* Compile-time symbol for ProtocolRoutine initializer. */
-extern const struct ParserRoutine MySQLParserRoutine;
 
 /* GUC variable */
 extern int database_compat_mode;

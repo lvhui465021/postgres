@@ -13,6 +13,6 @@
 #define MYSQL_PROTOCOL_H
 
 extern void InitMySQLProtocolRoutine(void);
-extern const struct ProtocolRoutine MySQLProtocolRoutine;
+extern struct ProtocolRoutine MySQLProtocolRoutine;
 
 #endif   /* MYSQL_PROTOCOL_H */

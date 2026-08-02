@@ -42,20 +42,18 @@ backend_parser = custom_target('gram',
 generated_sources += backend_parser.to_list()
 parser_sources += backend_parser
 
-# MySQL scanner generation
+# MySQL scanner generation (consumed by the loadable mysql_parser module)
 mys_backend_scanner = custom_target('mys_scan',
   input: 'mysql/mys_scan.l',
   output: 'mys_scan.c',
   command: [flex_cmd, '--no-backup', '--', '-CF', '-p', '-p'],
 )
-generated_sources += mys_backend_scanner
 
 # MySQL grammar generation
 mys_backend_parser = custom_target('mys_gram',
   input: 'mysql/mys_gram.y',
   kwargs: bison_kw,
 )
-generated_sources += mys_backend_parser.to_list()
 
 # MySQL keyword hash generation (mys_kwlist_d.h)
 mys_kwlist_d = custom_target('mys_kwlist_d',
@@ -64,19 +62,28 @@ mys_kwlist_d = custom_target('mys_kwlist_d',
   command: [perl, join_paths(meson.project_source_root(), 'src', 'tools', 'gen_keywordlist.pl'),
             '--extern', '--output', '@OUTDIR@', '--varname=MysScanKeywords', '@INPUT@'],
 )
-generated_sources += mys_kwlist_d
-parser_sources += mys_kwlist_d
 
-# MySQL keyword source needs the generated mys_kwlist_d.h header
-parser_sources += files('mysql/mys_keywords.c')
-parser_sources += files('mysql/mys_parser.c')
-parser_sources += mys_backend_scanner
-parser_sources += mys_backend_parser
-
-# MySQL parser sources
-parser_sources += files('mysql/mys_expr_transform.c')
-parser_sources += files('mysql/mys_gram_globals.c', 'mysql/mys_namespace_stubs.c')
-parser_sources += files('mysql/mys_parse_utilcmd.c')
+# MySQL compatibility parser as a loadable shared module.  The kernel
+# keeps the ParserRoutine vtable skeleton; the module registers itself
+# via _PG_init (see mysql/mys_parser.c).  Mirrors the mysm module pattern.
+mysql_parser = shared_module('mysql_parser',
+  [
+    'mysql/mys_expr_transform.c',
+    'mysql/mys_gram_globals.c',
+    'mysql/mys_keywords.c',
+    'mysql/mys_namespace_stubs.c',
+    'mysql/mys_parse_utilcmd.c',
+    'mysql/mys_parser.c',
+    mys_backend_scanner,
+    mys_backend_parser,
+    mys_kwlist_d,
+  ],
+  include_directories: postgres_inc,
+  c_args: ['-fvisibility=default'],
+  install: true,
+  install_dir: dir_lib_pkg,
+  name_prefix: '',
+)
 parser = static_library('parser',
   parser_sources,
   dependencies: [backend_code],

@@ -722,7 +722,7 @@ static void makeOnClause(Node **expr, JoinExpr *joinExpr);
 	DETACH DETERMINISTIC DICTIONARY DIRECTORY DISABLE_P DISCARD DISK DISTINCT DISTINCTROW DIV DO DOCUMENT_P DOMAIN_P
 	DOUBLE_P DROP DUPLICATE DYNAMIC
 
-	EACH ELSE ELSEIF ENABLE_P ENCODING ENCRYPTED ENCRYPTION END_P ENGINE ENGINES ENUM_P ESCAPE EVENT EXCEPT
+	EACH ELSE ELSEIF ENABLE_P ENCODING ENCRYPTED ENCRYPTION END_P MYS_ENGINE ENGINES ENUM_P ESCAPE EVENT EXCEPT
 	EXCLUDE EXCLUDING EXCLUSIVE EXECUTE EXISTS EXIT EXPLAIN EXPRESSION
 	EXTENSION EXTERNAL EXTRACT
 
@@ -2643,7 +2643,7 @@ VariableShowStmt:
 
 					$$ = (Node *)selectStmt;
                 }
-            | SHOW ENGINE ColId STATUS
+            | SHOW MYS_ENGINE ColId STATUS
 			    {
                     ereport(ERROR,
                             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -5856,7 +5856,7 @@ alter_table_option:
                     {
                         $$ = NULL;
                     }
-                | ENGINE opt_equal IDENT
+                | MYS_ENGINE opt_equal IDENT
                     {
                         $$ = NULL;
                     }
@@ -5997,7 +5997,7 @@ create_table_option:
                     {
                         $$ = NULL;
                     }
-                | ENGINE opt_equal IDENT
+                | MYS_ENGINE opt_equal IDENT
                     {
                         $$ = NULL;
                     }
@@ -21958,7 +21958,7 @@ unreserved_keyword:
 			| ENCODING
 			| ENCRYPTED
 			| ENCRYPTION
-			| ENGINE
+			| MYS_ENGINE
 			| ENGINES
 			| ENUM_P
 			| ESCAPE
@@ -22631,7 +22631,7 @@ bare_label_keyword:
 			| ENCRYPTED
 			| ENCRYPTION
 			| END_P
-			| ENGINE
+			| MYS_ENGINE
 			| ENGINES
 			| ENUM_P
 			| ESCAPE

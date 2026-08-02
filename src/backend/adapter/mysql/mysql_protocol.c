@@ -1425,7 +1425,7 @@ mysql_report_parameter_status(const char *name, const char *value)
  *    ProtocolRoutine instance
  * ----------------------------------------------------------------
  */
-const ProtocolRoutine MySQLProtocolRoutine = {
+ProtocolRoutine MySQLProtocolRoutine = {
     .kind = COMPAT_PROTOCOL_MYSQL,
     .name = "MySQL",
 
@@ -1459,7 +1459,11 @@ const ProtocolRoutine MySQLProtocolRoutine = {
 
     .process_utility = mys_standard_ProcessUtility,
 
-    .parser_routine = &MySQLParserRoutine,
+    /*
+     * parser_routine is filled at postmaster startup from the registered
+     * dialect table (see InitMySQLProtocolRoutine): the MySQL parser
+     * ships as a loadable module, so it cannot be referenced here.
+     */
 };
 
 /* ----------------------------------------------------------------
@@ -1469,6 +1473,14 @@ const ProtocolRoutine MySQLProtocolRoutine = {
 void
 InitMySQLProtocolRoutine(void)
 {
+    /*
+     * Bind the loadable MySQL parser at startup: raw-parse dispatch in
+     * PostgresMain() reads protocol_routine->parser_routine, and the
+     * kernel cannot reference mysql_parser.so symbols at link time.
+     */
+    MySQLProtocolRoutine.parser_routine =
+        GetRegisteredParserRoutine(COMPAT_PROTOCOL_MYSQL);
+
     RegisterProtocolRoutine(&MySQLProtocolRoutine);
 
     /* Register MySQL's CTAS post-hook so backends inherit it. */

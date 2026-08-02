@@ -94,6 +94,7 @@
 #include "parser/parse_collate.h"
 #include "parser/parse_node.h"
 #include "parser/parse_relation.h"
+#include "parser/mysql/mys_parser_exports.h"
 #include "parser/parse_type.h"
 #include "parser/parse_utilcmd.h"
 #include "parser/mysql/mys_parse_utilcmd.h"
@@ -3521,7 +3522,7 @@ ATParseTransformCmd(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	 * ENUM/SET backing objects.  The core transformer leaves those tags
 	 * untouched, which later makes MODIFY operate on the raw pseudo-type.
 	 */
-	atstmt = mys_transformAlterTableStmt(RelationGetRelid(rel),
+	atstmt = mys_parser_exports->mys_transformAlterTableStmt(RelationGetRelid(rel),
 									 atstmt,
 									 context->queryString,
 									 &beforeStmts,
@@ -16811,7 +16812,7 @@ mysProcessAutoIncForRenameAtt(Relation targetRel, char *oldColName,
         if (renameFunStmt != NULL)
             *stmts = lappend(*stmts, renameFunStmt);
         
-        createFuncStmt = createAutoIncrementTriggerFunc(namespaceName, 
+        createFuncStmt = mys_parser_exports->createAutoIncrementTriggerFunc(namespaceName, 
                                                         relName, 
                                                         newColName);
         *stmts = lappend(*stmts, createFuncStmt);
@@ -17014,7 +17015,7 @@ mysProcessOnUpdateNowForRenameAtt(Relation targetRel, char *oldColName,
         if (renameFuncStmt != NULL)
             *stmts = lappend(*stmts, renameFuncStmt);
         
-        createFuncStmt = createAutoUpdateTimeStampTriggerFunc(namespaceName, 
+        createFuncStmt = mys_parser_exports->createAutoUpdateTimeStampTriggerFunc(namespaceName, 
                                                               relName, 
                                                               newColName);
         *stmts = lappend(*stmts, createFuncStmt);
@@ -17113,7 +17114,7 @@ mysProcessAutoIncForRenameRelation(Relation targetRel, char *oldTableName,
             if (renameFuncStmt != NULL)
                 *stmts = lappend(*stmts, renameFuncStmt);
             
-            createFuncStmt = createAutoIncrementTriggerFunc(namespaceName, 
+            createFuncStmt = mys_parser_exports->createAutoIncrementTriggerFunc(namespaceName, 
                                                             newTableName, 
                                                             autoIncColName);
             *stmts = lappend(*stmts, createFuncStmt);
@@ -17380,7 +17381,7 @@ mysPreProcessDropStmt(DropStmt *dropStmt)
 
             if (schemaName == NULL)
             {
-				schemaOid = getCurrentNamespaceOid();
+				schemaOid = mys_parser_exports->getCurrentNamespaceOid();
             }
             else 
             {
@@ -17395,7 +17396,7 @@ mysPreProcessDropStmt(DropStmt *dropStmt)
             }
             else    
             {
-				schemaName = get_namespace_name(getCurrentNamespaceOid());
+				schemaName = get_namespace_name(mys_parser_exports->getCurrentNamespaceOid());
                 names = list_make2(makeString(pstrdup(schemaName)), 
                                    makeString(pstrdup(newIndexName)));
             }
@@ -17506,13 +17507,13 @@ create_mysql_ctas_on_update_triggers(ParseState *pstate, Query *query,
 
 		target_colname = NameStr(TupleDescAttr(RelationGetDescr(target_rel),
 											output_attnum - 1)->attname);
-		function_stmt = createAutoUpdateTimeStampTriggerFunc(
+		function_stmt = mys_parser_exports->createAutoUpdateTimeStampTriggerFunc(
 			(char *) target_schema, (char *) target_name,
 			(char *) target_colname);
 		(void) CreateFunction(pstate, function_stmt);
 		CommandCounterIncrement();
 
-		trigger_stmt = createAutoUpdateTimeStampTrigger(
+		trigger_stmt = mys_parser_exports->createAutoUpdateTimeStampTrigger(
 			(char *) target_schema, (char *) target_name,
 			(char *) target_colname);
 		(void) CreateTrigger(trigger_stmt, NULL, target_relid, InvalidOid,
