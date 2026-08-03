@@ -1,4 +1,11 @@
 #include "postgres.h"
+
+#include <ctype.h>
+#include <errno.h>
+#include <limits.h>
+#include <math.h>
+#include <stdlib.h>
+
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/pg_list.h"
@@ -121,6 +128,40 @@ mys_transform_expr_node(ParseState *pstate, Node *expr, Node **result)
 				opname = strVal(linitial(aexpr->name));
 
 			/*
+			 * MySQL writes JSON paths as '$.key', while PostgreSQL's json
+			 * ->> operator treats the right operand as one literal key.  Lower
+			 * the path form to the extension helper before normal operator
+			 * resolution; bare PostgreSQL-style keys retain native semantics.
+			 */
+			if (opname != NULL && strcmp(opname, "->>") == 0 &&
+				aexpr->rexpr != NULL && IsA(aexpr->rexpr, A_Const))
+			{
+				A_Const *path = (A_Const *) aexpr->rexpr;
+				FuncCall *fn;
+
+				if (!path->isnull && path->val.node.type == T_String &&
+					strncmp(path->val.sval.sval, "$.", 2) == 0)
+				{
+					fn = makeNode(FuncCall);
+					fn->funcname = list_make2(makeString("mysql"),
+										 makeString("json_path_extract_text"));
+					fn->args = list_make2(aexpr->lexpr, aexpr->rexpr);
+					fn->agg_order = NIL;
+					fn->agg_filter = NULL;
+					fn->over = NULL;
+					fn->agg_within_group = false;
+					fn->agg_star = false;
+					fn->agg_distinct = false;
+					fn->func_variadic = false;
+					fn->funcformat = COERCE_EXPLICIT_CALL;
+					fn->location = aexpr->location;
+					*result = transformExpr(pstate, (Node *) fn,
+										pstate->p_expr_kind);
+					return true;
+				}
+			}
+
+			/*
 			 * In non-strict mode MySQL converts an empty string to zero in a
 			 * numeric expression.  Do this while the raw literal and session
 			 * sql_mode are still visible; PG18's normal operator resolver can
@@ -151,6 +192,35 @@ mys_transform_expr_node(ParseState *pstate, Node *expr, Node **result)
 						{
 							constant->val.node.type = T_Integer;
 							constant->val.ival.ival = 0;
+						}
+						else if (!constant->isnull &&
+							constant->val.node.type == T_String)
+						{
+							const char *literal = constant->val.sval.sval;
+							char *endptr;
+							double numeric;
+
+							errno = 0;
+							numeric = strtod(literal, &endptr);
+							while (isspace((unsigned char) *endptr))
+								endptr++;
+
+							/* MySQL non-strict arithmetic consumes a numeric prefix. */
+							if (endptr != literal && *endptr != '\0' &&
+								errno != ERANGE && isfinite(numeric))
+							{
+								if (numeric >= INT_MIN && numeric <= INT_MAX &&
+									floor(numeric) == numeric)
+								{
+									constant->val.node.type = T_Integer;
+									constant->val.ival.ival = (int) numeric;
+								}
+								else
+								{
+									constant->val.node.type = T_Float;
+									constant->val.fval.fval = psprintf("%.17g", numeric);
+								}
+							}
 						}
 					}
 				}

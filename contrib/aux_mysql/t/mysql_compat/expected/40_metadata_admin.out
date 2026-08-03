@@ -278,6 +278,14 @@ unvdb_mysqldb
 7 rows in set
 
 --------------
+SHOW DATABASES LIKE 'mysql_compat_%'
+--------------
+
+database
+mysql_compat_metadata
+1 row in set
+
+--------------
 SHOW CHARACTER SET
 --------------
 
@@ -633,6 +641,30 @@ sql_mode
 1 row in set
 
 --------------
+SHOW STATUS LIKE 'server_version'
+--------------
+
+Variable_name	Value
+server_version	18.3
+1 row in set
+
+--------------
+SHOW SESSION STATUS LIKE 'server_version'
+--------------
+
+Variable_name	Value
+server_version	18.3
+1 row in set
+
+--------------
+SHOW GLOBAL STATUS LIKE 'server_version'
+--------------
+
+Variable_name	Value
+server_version	18.3
+1 row in set
+
+--------------
 SHOW PROCESSLIST
 --------------
 
@@ -689,6 +721,18 @@ WHERE schema_name = 'mysql_compat_metadata'
 
 test_name	passed
 metadata_indexes	1
+1 row in set
+
+--------------
+SELECT 'information_schema_statistics' AS test_name,
+       COUNT(*) >= 2 AS passed
+FROM information_schema.statistics
+WHERE table_schema = 'mysql_compat_metadata'
+  AND table_name = 'mysql_metadata_table'
+--------------
+
+test_name	passed
+information_schema_statistics	1
 1 row in set
 
 --------------

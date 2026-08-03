@@ -304,11 +304,17 @@ sub mysql_query_select {
         my ($col_seq, $col) = mysql_recv_packet($sock);
     }
 
-    # Read rows until the EOF/OK terminator (first byte 0xFE with DEPRECATE_EOF)
+    # Read rows until the EOF/OK terminator.  The MySQL protocol normally uses
+    # 0xFE for a result-set terminator with CLIENT_DEPRECATE_EOF, but an OK
+    # packet (0x00) is also valid for servers/paths that do not negotiate that
+    # capability.  A one-column empty-string row is exactly one NUL byte, so
+    # only treat a multi-byte 0x00 packet as an OK terminator.
     my @rows;
     while (1) {
         my ($row_seq, $row_pkt) = mysql_recv_packet($sock);
-        last if ord(substr($row_pkt, 0, 1)) == 0xFE;  # terminator
+        my $row_marker = ord(substr($row_pkt, 0, 1));
+        last if $row_marker == 0xFE ||
+            ($row_marker == 0x00 && length($row_pkt) >= 7);
         my @cols;
         my $off = 0;
         while ($off < length($row_pkt)) {
@@ -355,6 +361,7 @@ $node->append_conf('postgresql.conf', "mysql_listener_on = true");
 $node->append_conf('postgresql.conf', "mysql_port = $mysql_port");
 $node->append_conf('postgresql.conf', "mysql_backend_database = 'postgres'");
 $node->append_conf('postgresql.conf', "listen_addresses = '127.0.0.1'");
+$node->append_conf('postgresql.conf', "max_parallel_workers = 2");
 # mysm registers the MySQL ADT method table in _PG_init; preload so the
 # MySQL type semantics apply from session start.
 $node->append_conf('postgresql.conf', "shared_preload_libraries = 'mysql_parser, mysm, aux_mysql'");
@@ -487,6 +494,46 @@ SKIP: {
     is($? >> 8, 0, 'official MySQL 8.4.10 CLI authenticates through AuthSwitch');
     is($cli_output, "42\n", 'official MySQL 8.4.10 CLI can execute a query');
 }
+
+# -- MyCompatMode propagation into parallel workers ---------------------
+# The cast is deliberately evaluated for every scanned row, so the worker
+# must use the MySQL ADT time input hook rather than the PostgreSQL fallback.
+# Compare a serial execution with a forced parallel plan over the MySQL wire;
+# this is the runtime form of the FixedParallelState protocol-kind contract.
+$node->safe_psql('postgres', <<'SQL');
+CREATE TABLE mysql_parallel_compat (raw_time text NOT NULL);
+INSERT INTO mysql_parallel_compat
+SELECT '-01:02:03' FROM generate_series(1, 100000);
+ANALYZE mysql_parallel_compat;
+ALTER TABLE mysql_parallel_compat SET (parallel_workers = 2);
+GRANT SELECT ON mysql_parallel_compat TO mysql_user;
+SQL
+
+my $parallel_sql =
+    'SELECT sum(EXTRACT(EPOCH FROM CAST(raw_time AS TIME))) ' .
+    'FROM public.mysql_parallel_compat';
+mysql_query_ok($sock, 'SET max_parallel_workers_per_gather = 0');
+my ($serial_cols, @serial_rows) = mysql_query_select($sock, $parallel_sql);
+is($serial_cols, 1, 'serial MySQL compatibility query returns one column');
+is(scalar(@serial_rows), 1, 'serial MySQL compatibility query returns one row');
+
+mysql_query_ok($sock, 'SET min_parallel_table_scan_size = 0');
+mysql_query_ok($sock, 'SET parallel_setup_cost = 0');
+mysql_query_ok($sock, 'SET parallel_tuple_cost = 0');
+mysql_query_ok($sock, 'SET max_parallel_workers_per_gather = 2');
+my ($plan_cols, @plan_rows) = mysql_query_select($sock,
+    'EXPLAIN SELECT sum(EXTRACT(EPOCH FROM CAST(raw_time AS TIME))) ' .
+    'FROM public.mysql_parallel_compat');
+my $plan_text = join("\n", map { join(' ', @$_) } @plan_rows);
+like($plan_text, qr/Parallel Seq Scan|Gather/,
+     'forced MySQL query uses a parallel scan/gather plan');
+
+my ($parallel_cols, @parallel_rows) = mysql_query_select($sock, $parallel_sql);
+is($parallel_cols, 1, 'parallel MySQL compatibility query returns one column');
+is_deeply(\@parallel_rows, \@serial_rows,
+          'parallel MySQL ADT semantics equal serial semantics');
+
+$node->safe_psql('postgres', 'DROP TABLE mysql_parallel_compat');
 
 # -- Auth switch: caching_sha2_password -> mysql_native_password --
 # The initial caching_sha2 response is deliberately a real 32-byte token.
@@ -2299,16 +2346,12 @@ $node->safe_psql('postgres', 'CREATE EXTENSION IF NOT EXISTS aux_mysql');
     is($tc_rows[1][1], 'varchar',   'columns maps varchar');
     is($tc_rows[1][2], 'YES',       'columns name IS_NULLABLE=YES');
 
-    # 2c: statistics view — verify PK index metadata
+    # 2c: statistics view — verify live PK index metadata
     my $si = mysql_query_one_text($is_sock,
         "SELECT COLUMN_NAME FROM information_schema.statistics " .
         "WHERE TABLE_SCHEMA = 'public' AND TABLE_NAME = '_is_test_t' ORDER BY SEQ_IN_INDEX LIMIT 1");
-    # mys_informa_schema.statistics is a static catalog snapshot that is not
-    # populated for newly created tables; the query must complete without
-    # hanging (regression for the zero-row result-set hang) and currently
-    # returns no rows.
-    ok(!defined($si),
-       'information_schema.statistics query completes (unpopulated → no rows)');
+    is($si, 'id',
+       'information_schema.statistics exposes the live primary-key column');
 
     # Cleanup
     mysql_query_ok($is_sock, 'DROP TABLE public._is_test_t');

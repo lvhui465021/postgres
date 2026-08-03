@@ -18,29 +18,27 @@
 
 #include "miscadmin.h"
 #include "libpq/libpq-be.h"
+#include "postmaster/compatibility.h"
 
 /* GUC variable */
-int database_compat_mode = POSTGRESQL_COMPAT_MODE;
+int database_compat_mode = COMPAT_PROTOCOL_POSTGRES;
 
 /* Parser Engine Instance */
 const ParserRoutine *parserengine = NULL;
 
-/* Dialect parser tables registered via RegisterParserRoutine(). */
-static const ParserRoutine *dialect_parser[COMPAT_PROTOCOL_KIND_MAX];
-
 /*
  * RegisterParserRoutine
  *
- * Register (or replace) the ParserRoutine for a compatibility kind.  The
- * kernel dispatches to it in InitParserEngine() by MyCompatMode; kinds
- * without a registered table fall back to the standard PG parser.
+ * Register (or replace) the parser slot in the unified compatibility
+ * registry.  Kinds without a registered table fall back to the standard
+ * PostgreSQL parser.
  */
 void
 RegisterParserRoutine(CompatibilityProtocolKind kind,
 					  const ParserRoutine *routine)
 {
 	Assert(kind >= 0 && kind < COMPAT_PROTOCOL_KIND_MAX);
-	dialect_parser[kind] = routine;
+	RegisterCompatibilityParser(kind, routine);
 }
 
 /*
@@ -74,8 +72,7 @@ InitCompatMode(void)
 	if (MyProcPort != NULL)
 		MyCompatMode = MyProcPort->protocol_kind;
 	else
-		MyCompatMode = (database_compat_mode == MYSQL_COMPAT_MODE) ?
-			COMPAT_PROTOCOL_MYSQL : COMPAT_PROTOCOL_POSTGRES;
+		MyCompatMode = (CompatibilityProtocolKind) database_compat_mode;
 }
 
 /* ----------------------------------------------------------------
@@ -105,7 +102,9 @@ GetStandardParserRoutine(void)
 const ParserRoutine *
 GetDialectParserRoutine(void)
 {
-	const ParserRoutine *routine = dialect_parser[MyCompatMode];
+	const CompatibilityRoutine *compat =
+		GetCompatibilityRoutine(MyCompatMode);
+	const ParserRoutine *routine = compat != NULL ? compat->parser : NULL;
 
 	return routine != NULL ? routine : GetStandardParserRoutine();
 }
@@ -121,8 +120,9 @@ GetDialectParserRoutine(void)
 const ParserRoutine *
 GetRegisteredParserRoutine(CompatibilityProtocolKind kind)
 {
-	Assert(kind >= 0 && kind < COMPAT_PROTOCOL_KIND_MAX);
-	return dialect_parser[kind];
+	const CompatibilityRoutine *compat = GetCompatibilityRoutine(kind);
+
+	return compat != NULL ? compat->parser : NULL;
 }
 
 /*
@@ -135,8 +135,5 @@ GetRegisteredParserRoutine(CompatibilityProtocolKind kind)
 void
 InitParserEngine(void)
 {
-	/* The MySQL table is registered at library load time (see below). */
-	parserengine = dialect_parser[MyCompatMode];
-	if (parserengine == NULL)
-		parserengine = GetStandardParserRoutine();
+	parserengine = GetDialectParserRoutine();
 }

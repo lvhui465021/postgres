@@ -1,40 +1,5 @@
 # mysql-compat full transcript
 --------------
-SHOW DATABASES LIKE 'mysql_compat_known_metadata'
---------------
-
-ERROR 1064 (42000) at line 1: syntax error at or near "LIKE"
---------------
-SHOW STATUS
---------------
-
-ERROR 1146 (42S02) at line 2: relation "mys_informa_schema.db_status" does not exist
---------------
-SHOW SESSION STATUS
---------------
-
-ERROR 1146 (42S02) at line 3: relation "mys_informa_schema.db_status" does not exist
---------------
-SHOW GLOBAL STATUS
---------------
-
-ERROR 1146 (42S02) at line 4: relation "mys_informa_schema.db_status" does not exist
---------------
-SELECT TO_BASE64(CAST('abc' AS CHAR))
---------------
-
-ERROR 1305 (42000) at line 5: function to_base64(character varying) does not exist
---------------
-SELECT LOAD_FILE('/mysql-compat-file-does-not-exist')
---------------
-
-ERROR 1105 (HY000) at line 6: could not open file "/mysql-compat-file-does-not-exist" for reading: No such file or directory
---------------
-SELECT CAST(18446744073709551615 AS UNSIGNED)
---------------
-
-ERROR 1210 (HY000) at line 7: bigint out of range
---------------
 CREATE TEMPORARY TABLE mysql_known_api_name(function_name VARCHAR(64))
 --------------
 
@@ -51,46 +16,12 @@ SELECT 'catalog_name_collation' AS test_name, COUNT(*) = 1 AS passed
 FROM mysql_known_api_name r JOIN pg_proc p ON p.proname = r.function_name
 --------------
 
-ERROR 1105 (HY000) at line 10: could not determine which collation to use for string hashing
+ERROR 1105 (HY000) at line 3: could not determine which collation to use for string hashing
 --------------
 DROP TEMPORARY TABLE mysql_known_api_name
 --------------
 
 Query OK, 0 rows affected
-
---------------
-SELECT 'json_dollar_path' AS test_name,
-       JSON_OBJECT('key', 'text')->>'$.key' = 'text' AS passed
---------------
-
-test_name	passed
-json_dollar_path	NULL
-1 row in set
-
---------------
-SELECT mysql.get_lock('mysql_compat_known_lock', 0)
---------------
-
-get_lock
-1
-1 row in set
-
---------------
-SELECT 'named_lock_state' AS test_name,
-       mysql.is_used_lock('mysql_compat_known_lock') IS NOT NULL AS passed
---------------
-
-test_name	passed
-named_lock_state	0
-1 row in set
-
---------------
-SELECT mysql.release_lock('mysql_compat_known_lock')
---------------
-
-release_lock
-1
-1 row in set
 
 --------------
 DROP DATABASE IF EXISTS mysql_compat_known_metadata
@@ -105,72 +36,10 @@ CREATE DATABASE mysql_compat_known_metadata
 Query OK, 0 rows affected
 
 --------------
-CREATE TABLE mysql_known_zero_length (
-  varchar_zero VARCHAR(0),
-  char_zero CHAR(0)
-)
---------------
-
-Query OK, 0 rows affected
-
---------------
-INSERT INTO mysql_known_zero_length VALUES ('', ''), (NULL, NULL)
---------------
-
-Query OK, 2 rows affected
-
---------------
-SELECT 'zero_length_char_varchar' AS test_name,
-       (SELECT COUNT(*) = 1 FROM mysql_known_zero_length
-        WHERE varchar_zero = '' AND char_zero = '')
-       AND (SELECT COUNT(*) = 2
-            FROM information_schema.columns
-            WHERE table_schema = 'mysql_compat_known_metadata'
-              AND table_name = 'mysql_known_zero_length'
-              AND ((column_name = 'varchar_zero' AND column_type = 'varchar(0)')
-                   OR (column_name = 'char_zero' AND column_type = 'char(0)'))) AS passed
---------------
-
-test_name	passed
-zero_length_char_varchar	0
-1 row in set
-
---------------
 CREATE TABLE mysql_known_indexed (id INT PRIMARY KEY, value_int INT)
 --------------
 
 Query OK, 0 rows affected
-
---------------
-CREATE INDEX mysql_known_value_idx ON mysql_known_indexed(value_int)
---------------
-
-Query OK, 0 rows affected
-
---------------
-CREATE TABLE mysql_known_trigger_audit(id INT PRIMARY KEY, value_int INT)
---------------
-
-Query OK, 0 rows affected
-
---------------
-CREATE TRIGGER mysql_known_after_insert AFTER INSERT ON mysql_known_indexed
-FOR EACH ROW INSERT INTO mysql_known_trigger_audit(id, value_int)
-VALUES (NEW.id, NEW.value_int)
---------------
-
-ERROR 1064 (42000) at line 39: syntax error at or near "INSERT"
---------------
-SELECT 'information_schema_statistics' AS test_name,
-       COUNT(*) > 0 AS passed
-FROM information_schema.statistics
-WHERE table_schema = 'mysql_compat_known_metadata'
-  AND table_name = 'mysql_known_indexed'
---------------
-
-test_name	passed
-information_schema_statistics	0
-1 row in set
 
 --------------
 CREATE TABLE mysql_known_update_a(id INT PRIMARY KEY, value_int INT)
@@ -202,43 +71,7 @@ SET a.value_int = 11, b.value_int = 21
 WHERE a.id = b.id
 --------------
 
-ERROR 1064 (42000) at line 51: syntax error, multi table name or alias in set.
---------------
-CREATE TABLE mysql_known_partitioned(id INT, value_int INT)
-PARTITION BY RANGE(id)
---------------
-
-Query OK, 0 rows affected
-
---------------
-CREATE TABLE mysql_known_partition_0 PARTITION OF mysql_known_partitioned
-FOR VALUES FROM (0) TO (10)
---------------
-
-ERROR 1105 (HY000) at line 56: cannot inherit from partitioned table "mysql_known_partitioned"
---------------
-UPDATE LOW_PRIORITY mysql_known_indexed
-SET value_int = value_int WHERE id = 1
---------------
-
-ERROR 1064 (42000) at line 58: syntax error at or near "LOW_PRIORITY"
---------------
-SET sql_mode = ''
---------------
-
-Query OK, 0 rows affected
-
---------------
-SELECT '12abc' + 0
---------------
-
-ERROR 1210 (HY000) at line 61: invalid input syntax for type integer: "12abc"
---------------
-SET sql_mode = DEFAULT
---------------
-
-Query OK, 0 rows affected
-
+ERROR 1064 (42000) at line 14: syntax error, multi table name or alias in set.
 --------------
 DROP DATABASE mysql_compat_known_metadata
 --------------

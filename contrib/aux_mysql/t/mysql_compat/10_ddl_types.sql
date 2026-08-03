@@ -94,6 +94,40 @@ SELECT 'json_column_type' AS test_name,
        mysql.json_unquote(json_value->'key') = '1' AS passed
 FROM mysql_ddl_json WHERE id = 1;
 
+CREATE TABLE mysql_ddl_zero_length (varchar_zero VARCHAR(0), char_zero CHAR(0));
+INSERT INTO mysql_ddl_zero_length VALUES ('', ''), (NULL, NULL);
+SELECT 'zero_length_char_varchar' AS test_name,
+       (SELECT COUNT(*) = 1 FROM mysql_ddl_zero_length
+        WHERE varchar_zero = '' AND char_zero = '')
+       AND (SELECT COUNT(*) = 2
+            FROM information_schema.columns
+            WHERE table_schema = 'mysql_compat_ddl'
+              AND table_name = 'mysql_ddl_zero_length'
+              AND ((column_name = 'varchar_zero' AND column_type = 'varchar(0)')
+                   OR (column_name = 'char_zero' AND column_type = 'char(0)'))) AS passed;
+
+CREATE TABLE mysql_ddl_partitioned (id INT, value_int INT)
+PARTITION BY RANGE (id);
+CREATE TABLE mysql_ddl_partition_0 PARTITION OF mysql_ddl_partitioned
+FOR VALUES FROM (0) TO (10);
+INSERT INTO mysql_ddl_partitioned VALUES (1, 10);
+SELECT 'partition_of' AS test_name,
+       (SELECT COUNT(*) = 1 FROM mysql_ddl_partition_0
+        WHERE id = 1 AND value_int = 10) AS passed;
+
+CREATE TABLE mysql_ddl_trigger_source (id INT PRIMARY KEY, value_int INT);
+CREATE TABLE mysql_ddl_trigger_audit (id INT PRIMARY KEY, value_int INT);
+CREATE TRIGGER mysql_ddl_after_insert AFTER INSERT ON mysql_ddl_trigger_source
+FOR EACH ROW INSERT INTO mysql_ddl_trigger_audit(id, value_int)
+VALUES (NEW.id, NEW.value_int);
+SELECT p.proname, p.prosrc
+FROM pg_proc p
+WHERE p.proname LIKE '__mysql_trigger%';
+INSERT INTO mysql_ddl_trigger_source VALUES (1, 10);
+SELECT 'simple_trigger' AS test_name,
+       (SELECT COUNT(*) = 1 FROM mysql_ddl_trigger_audit
+        WHERE id = 1 AND value_int = 10) AS passed;
+
 UPDATE mysql_ddl_types SET touched = '2000-01-01 00:00:00' WHERE name = 'types';
 UPDATE mysql_ddl_types SET name = 'types-updated' WHERE name = 'types';
 SELECT 'on_update_current_timestamp' AS test_name,

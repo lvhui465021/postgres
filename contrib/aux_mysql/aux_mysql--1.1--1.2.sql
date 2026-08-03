@@ -10475,3 +10475,26 @@ GRANT ALL PRIVILEGES ON ALL tables IN SCHEMA mys_informa_schema TO public;
 GRANT ALL PRIVILEGES ON ALL tables IN SCHEMA sys TO public;
 GRANT ALL PRIVILEGES ON ALL tables IN SCHEMA mys_sys TO public;
 
+CREATE OR REPLACE FUNCTION mysql.to_base64(text)
+RETURNS text
+AS $$SELECT pg_catalog.encode(pg_catalog.convert_to($1, 'UTF8'), 'base64')$$
+LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE OR REPLACE VIEW mys_informa_schema.db_status AS
+SELECT name::varchar(256) AS variable_name,
+       setting::text AS value
+FROM pg_catalog.pg_settings;
+GRANT ALL PRIVILEGES ON mys_informa_schema.db_status TO public;
+
+CREATE OR REPLACE FUNCTION mysql.json_path_extract_text(json, text)
+RETURNS text
+AS $$
+SELECT CASE WHEN $2 LIKE '$.%'
+            THEN pg_catalog.json_extract_path_text(
+                     $1,
+                     VARIADIC pg_catalog.string_to_array(
+                         pg_catalog.substr($2, 3), '.'))
+            ELSE pg_catalog.json_extract_path_text($1, $2)
+       END
+$$
+LANGUAGE SQL IMMUTABLE STRICT;

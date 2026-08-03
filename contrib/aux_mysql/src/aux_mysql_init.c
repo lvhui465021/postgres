@@ -31,6 +31,7 @@
 #include "postmaster/protocol_routine.h"
 #include "utils/guc.h"
 #include "utils/memutils.h"
+#include "utils/varlena.h"
 
 PG_MODULE_MAGIC;
 
@@ -104,6 +105,10 @@ _PG_init(void)
 	 */
 	MySQLProtocolRoutine.parser_routine =
 		GetRegisteredParserRoutine(COMPAT_PROTOCOL_MYSQL);
+	if (MySQLProtocolRoutine.parser_routine == NULL)
+		ereport(ERROR,
+				(errmsg("aux_mysql requires mysql_parser to be preloaded before aux_mysql"),
+				errhint("set shared_preload_libraries to 'mysql_parser, mysm, aux_mysql'")));
 	RegisterProtocolRoutine(&MySQLProtocolRoutine);
 
 	/* Publish packet-state getters to the kernel SQL helpers. */

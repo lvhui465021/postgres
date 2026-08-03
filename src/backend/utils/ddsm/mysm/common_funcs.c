@@ -16,8 +16,7 @@
 #include "mysm_compat.h"
 
 #include "commands/sequence.h"
-
-extern void mys_setval3_oid(Oid seqOid, int64 next, bool isCalled);
+#include "utils/mysql_kernel_export.h"
 
 
 PG_FUNCTION_INFO_V1(mysSetval3Oid);
@@ -28,7 +27,5 @@ mysSetval3Oid(PG_FUNCTION_ARGS)
 	int64		next = PG_GETARG_INT64(1);
 	bool		iscalled = PG_GETARG_BOOL(2);
 
-	mys_setval3_oid(relid, next, iscalled);
-
-	PG_RETURN_INT64(next);
+	PG_RETURN_INT64(mys_setval3_oid(relid, next, iscalled));
 }

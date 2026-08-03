@@ -133,6 +133,33 @@ encoding_functions	1
 1 row in set
 
 --------------
+SELECT 'base64_text' AS test_name,
+       TO_BASE64(CAST('abc' AS CHAR)) = 'YWJj' AS passed
+--------------
+
+test_name	passed
+base64_text	1
+1 row in set
+
+--------------
+SELECT 'unsigned_cast' AS test_name,
+       CAST(18446744073709551615 AS UNSIGNED) = 18446744073709551615 AS passed
+--------------
+
+test_name	passed
+unsigned_cast	1
+1 row in set
+
+--------------
+SELECT 'load_file_missing_returns_null' AS test_name,
+       LOAD_FILE('/mysql-compat-file-does-not-exist') IS NULL AS passed
+--------------
+
+test_name	passed
+load_file_missing_returns_null	1
+1 row in set
+
+--------------
 SELECT 'repeat_untyped_literal' AS test_name,
        repeat('ab', 3) = 'ababab' AS passed
 --------------
@@ -146,7 +173,8 @@ SELECT 'json' AS test_name,
        json_object('key', 1) IS NOT NULL
        AND json(42) IS NOT NULL
        AND mysql.json_unquote(json_object('key', 'text')->'key') = 'text'
-       AND json_object('key', 'text')->>'key' = 'text' AS passed
+       AND json_object('key', 'text')->>'key' = 'text'
+       AND json_object('key', 'text')->>'$.key' = 'text' AS passed
 --------------
 
 test_name	passed
@@ -331,6 +359,16 @@ SELECT 'named_locks' AS test_name, mysql.get_lock('mysql_compat_lock', 0) = 1 AS
 
 test_name	passed
 named_locks	1
+1 row in set
+
+--------------
+SELECT 'named_lock_state' AS test_name,
+       mysql.is_used_lock('mysql_compat_lock') IS NOT NULL
+       AND mysql.is_free_lock('mysql_compat_lock') = 0 AS passed
+--------------
+
+test_name	passed
+named_lock_state	1
 1 row in set
 
 --------------

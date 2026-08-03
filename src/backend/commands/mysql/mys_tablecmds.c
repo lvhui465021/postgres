@@ -76,6 +76,7 @@
 #include "commands/createas.h"
 #include "commands/defrem.h"
 #include "commands/event_trigger.h"
+#include "commands/mysql/mys_sequence.h"
 #include "commands/mysql/mys_tablecmds.h"
 #include "commands/sequence.h"
 #include "commands/tablecmds.h"
@@ -263,22 +264,6 @@ getObjectClass(const ObjectAddress *object)
 
 	elog(ERROR, "unrecognized object class: %u", object->classId);
 	return OCLASS_CLASS;		/* keep compiler quiet */
-}
-
-/* Forward declaration from mys_sequence.c */
-extern void mys_setval3_oid(Oid seqOid, int64 next, bool isCalled);
-
-/*
- * Stub for mys_setval3_oid - delegates to DirectFunctionCall3(setval3_oid).
- * Original implementation in mys_sequence.c (pending PG18 migration).
- */
-void
-mys_setval3_oid(Oid seqOid, int64 next, bool isCalled)
-{
-    DirectFunctionCall3(setval3_oid,
-                        ObjectIdGetDatum(seqOid),
-                        Int64GetDatum(next),
-                        BoolGetDatum(isCalled));
 }
 
 /*

@@ -46,6 +46,10 @@ SELECT 'single_target_update_join' AS test_name,
        (SELECT value_int = 100 AND note = 'one' FROM mysql_dml_target WHERE id = 1)
        AND (SELECT value_int = 200 AND note = 'two' FROM mysql_dml_target WHERE id = 2) AS passed;
 
+UPDATE LOW_PRIORITY mysql_dml_target SET note = 'low priority' WHERE code = 'a';
+SELECT 'update_low_priority' AS test_name,
+       note = 'low priority' FROM mysql_dml_target WHERE code = 'a';
+
 SELECT value_int INTO @mysql_dml_selected
 FROM mysql_dml_target WHERE code = 'a';
 SELECT 'select_into_user_variable' AS test_name,
@@ -78,6 +82,10 @@ SELECT 'operators_and_coercion' AS test_name,
        AND (5 ^ 3 = 6) AND (8 >> 2 = 2) AND (1 << 3 = 8)
        AND ('10' - 2 = 8) AND ('10' / 2 = 5)
        AND ('10' = 10) AND ('2' < 10) AS passed;
+SET sql_mode = '';
+SELECT 'numeric_prefix_conversion' AS test_name,
+       '12abc' + 0 = 12 AS passed;
+SET sql_mode = DEFAULT;
 SELECT 'logical_operators' AS test_name,
        (1 AND 2) = 1 AND (0 OR 2) = 1 AND (1 XOR 1) = 0 AS passed;
 SELECT 'pattern_operators' AS test_name,

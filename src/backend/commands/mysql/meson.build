@@ -5,6 +5,5 @@ backend_sources += files(
   'mys_set.c',
   'mys_uservar.c',
   'mys_prepare.c',
-# TODO: pending PG18 migration:
-#  'mys_sequence.c',
+  'mys_sequence.c',
 )

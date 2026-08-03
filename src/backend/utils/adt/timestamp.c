@@ -185,6 +185,9 @@ timestamp_in(PG_FUNCTION_ARGS)
 	char		workbuf[MAXDATELEN + MAXDATEFIELDS];
 	DateTimeErrorExtra extra;
 
+	if (adtext != NULL && adtext->pre_timestamp_in != NULL)
+		str = adtext->pre_timestamp_in(str);
+
 	if (adtext != NULL && adtext->timestamp_in != NULL)
 		return adtext->timestamp_in(fcinfo);
 

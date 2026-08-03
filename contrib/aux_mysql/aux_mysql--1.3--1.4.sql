@@ -4,24 +4,42 @@ drop table if exists mys_informa_schema.statistics;
 drop view if exists mys_informa_schema.schemata;
 drop view if exists mys_informa_schema.tables;
 drop view if exists mys_informa_schema.columns;
-create table mys_informa_schema.statistics(
-    TABLE_CATALOG varchar(256),
-    TABLE_SCHEMA varchar(256),
-    TABLE_NAME varchar(256),
-    NON_UNIQUE bigint,
-    INDEX_SCHEMA varchar(256),
-    INDEX_NAME varchar(256),
-    SEQ_IN_INDEX bigint,
-    COLUMN_NAME varchar(256),
-    "collation" varchar(256),
-    CARDINALITY bigint,
-    SUB_PART bigint,
-    PACKED varchar(256),
-    NULLABLE varchar(256),
-    INDEX_TYPE varchar(256),
-    COMMENT varchar(256),
-    INDEX_COMMENT varchar(256)
-);
+-- Keep STATISTICS live.  MySQL clients use it for SHOW INDEX and expect
+-- indexes created after the extension was installed to be visible too.
+CREATE VIEW mys_informa_schema.statistics AS
+SELECT
+    'def'::varchar(256)                            AS TABLE_CATALOG,
+    ns.nspname::varchar(256)                       AS TABLE_SCHEMA,
+    cl.relname::varchar(256)                       AS TABLE_NAME,
+    CASE WHEN ind.indisunique THEN 0 ELSE 1
+    END::bigint                                    AS NON_UNIQUE,
+    ns.nspname::varchar(256)                       AS INDEX_SCHEMA,
+    ci.relname::varchar(256)                       AS INDEX_NAME,
+    mysql.get_seq_in_index(
+        att.attnum::pg_catalog.text,
+        ind.indkey
+    )::bigint                                      AS SEQ_IN_INDEX,
+    att.attname::varchar(256)                      AS COLUMN_NAME,
+    'A'::varchar(256)                              AS COLLATION,
+    0::bigint                                      AS CARDINALITY,
+    NULL::bigint                                   AS SUB_PART,
+    NULL::varchar(256)                             AS PACKED,
+    CASE WHEN att.attnotnull THEN '' ELSE 'YES'
+    END::varchar(256)                              AS NULLABLE,
+    am.amname::varchar(256)                        AS INDEX_TYPE,
+    ''::varchar(256)                               AS COMMENT,
+    ''::varchar(256)                               AS INDEX_COMMENT
+FROM pg_catalog.pg_index     ind
+JOIN pg_catalog.pg_class     cl  ON cl.oid = ind.indrelid
+JOIN pg_catalog.pg_class     ci  ON ci.oid = ind.indexrelid
+JOIN pg_catalog.pg_namespace ns  ON ns.oid = cl.relnamespace
+JOIN pg_catalog.pg_am        am  ON am.oid = ci.relam
+JOIN pg_catalog.pg_attribute att ON att.attrelid = cl.oid
+                                 AND att.attnum = ANY(ind.indkey)
+WHERE cl.relkind IN ('r', 'p')
+  AND ns.nspname NOT IN ('pg_catalog', 'information_schema')
+  AND ns.nspname !~ '^pg_'
+ORDER BY 1, 2, 3, 4, 7;
 
 DROP TABLE IF EXISTS MYS_INFORMA_SCHEMA.administrable_role_authorizations;
 CREATE TABLE MYS_INFORMA_SCHEMA.administrable_role_authorizations (
@@ -3157,7 +3175,8 @@ from pg_catalog.pg_namespace ns, pg_catalog.pg_class cl
 where cl.relnamespace = ns.oid and cl.relname !~ '^pg_' and cl.relname !~ '^sys_' and cl.relkind = 'v'
 order by 1;
 
-DROP FUNCTION IF EXISTS mysql.get_seq_in_index(pg_catalog.text, pg_catalog.int2vector);
+-- The signature is unchanged from 1.1.  CREATE OR REPLACE preserves the
+-- dependency owned by the live statistics view.
 CREATE OR REPLACE FUNCTION mysql.get_seq_in_index(pg_catalog.text, pg_catalog.int2vector)
 RETURNS pg_catalog.int2
 AS
@@ -4096,8 +4115,8 @@ SELECT
         end
         from pg_catalog.pg_type ty
         where att.atttypid = ty.oid)::varchar(64) as DATA_TYPE,
-    65535::bigint as CHARACTER_MAXIMUM_LENGTH,
-    65535::bigint as CHARACTER_OCTET_LENGTH,
+    CASE WHEN att.atttypmod = 4 THEN 0 ELSE 65535 END::bigint as CHARACTER_MAXIMUM_LENGTH,
+    CASE WHEN att.atttypmod = 4 THEN 0 ELSE 65535 END::bigint as CHARACTER_OCTET_LENGTH,
     NULL::bigint as NUMERIC_PRECISION,
     NULL::bigint as NUMERIC_SCALE,
     NULL::bigint as DATETIME_PRECISION,
@@ -4158,8 +4177,14 @@ SELECT
             when ty.typname='int8' then 'bigint'
             when ty.typname='bigint signed' then 'bigint signed'
             when ty.typname='bigint unsigned' then 'bigint unsigned'
-            when ty.typname='varchar' then pg_catalog.concat('varchar', pg_catalog.replace(format_type(att.atttypid, att.atttypmod), 'character varying', ''))
-            when ty.typname='bpchar' then pg_catalog.concat('char', pg_catalog.replace(format_type(att.atttypid, att.atttypmod), 'character', ''))
+            when ty.typname='varchar' then
+                CASE WHEN att.atttypmod = 4 THEN 'varchar(0)'
+                     ELSE pg_catalog.concat('varchar', pg_catalog.replace(format_type(att.atttypid, att.atttypmod), 'character varying', ''))
+                END
+            when ty.typname='bpchar' then
+                CASE WHEN att.atttypmod = 4 THEN 'char(0)'
+                     ELSE pg_catalog.concat('char', pg_catalog.replace(format_type(att.atttypid, att.atttypmod), 'character', ''))
+                END
             when ty.typname='text' then 'text'
             when ty.typname='date' then 'date'
             when ty.typname='time' then 'time'
@@ -5599,3 +5624,116 @@ GRANT ALL PRIVILEGES ON ALL tables IN SCHEMA mysql TO public;
 GRANT ALL PRIVILEGES ON ALL tables IN SCHEMA mys_informa_schema TO public;
 GRANT ALL PRIVILEGES ON ALL tables IN SCHEMA sys TO public;
 GRANT ALL PRIVILEGES ON ALL tables IN SCHEMA mys_sys TO public;
+
+CREATE OR REPLACE FUNCTION mysql.load_file(text)
+RETURNS text
+AS $$
+BEGIN
+    RETURN pg_catalog.pg_read_file($1);
+EXCEPTION WHEN OTHERS THEN
+    RETURN NULL;
+END;
+$$
+STABLE STRICT LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION mysql.to_base64(text)
+RETURNS text
+AS $$SELECT pg_catalog.encode(pg_catalog.convert_to($1, 'UTF8'), 'base64')$$
+LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE OR REPLACE VIEW mys_informa_schema.db_status AS
+SELECT name::varchar(256) AS variable_name,
+       setting::text AS value
+FROM pg_catalog.pg_settings;
+GRANT ALL PRIVILEGES ON mys_informa_schema.db_status TO public;
+
+CREATE OR REPLACE FUNCTION mysql.json_path_extract_text(json, text)
+RETURNS text
+AS $$
+SELECT CASE WHEN $2 LIKE '$.%'
+            THEN pg_catalog.json_extract_path_text(
+                     $1,
+                     VARIADIC pg_catalog.string_to_array(
+                         pg_catalog.substr($2, 3), '.'))
+            ELSE pg_catalog.json_extract_path_text($1, $2)
+       END
+$$
+LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION mysql.get_lock(text, int)
+RETURNS int
+STRICT VOLATILE LANGUAGE plpgsql
+AS $function$
+DECLARE
+    lock_key bigint := pg_catalog.hashtextextended($1, 0);
+    deadline timestamptz;
+BEGIN
+    IF $2 < 0 THEN
+        RETURN NULL;
+    ELSIF pg_catalog.pg_try_advisory_lock(lock_key) THEN
+        RETURN 1;
+    ELSIF $2 = 0 THEN
+        RETURN 0;
+    END IF;
+
+    deadline := clock_timestamp() + make_interval(secs => $2);
+    WHILE clock_timestamp() < deadline LOOP
+        PERFORM pg_catalog.pg_sleep(LEAST(
+            0.1,
+            GREATEST(0.0, EXTRACT(EPOCH FROM deadline - clock_timestamp()))));
+        IF pg_catalog.pg_try_advisory_lock(lock_key) THEN
+            RETURN 1;
+        END IF;
+    END LOOP;
+
+    RETURN 0;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION mysql.release_lock(text)
+RETURNS int
+STRICT VOLATILE LANGUAGE plpgsql
+AS $function$
+BEGIN
+    RETURN CASE WHEN pg_catalog.pg_advisory_unlock(
+        pg_catalog.hashtextextended($1, 0)) THEN 1 ELSE 0 END;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION mysql.is_free_lock(text)
+RETURNS int
+STRICT VOLATILE LANGUAGE plpgsql
+AS $function$
+DECLARE
+    lock_key bigint := pg_catalog.hashtextextended($1, 0);
+BEGIN
+    IF pg_catalog.pg_advisory_unlock(lock_key) THEN
+        PERFORM pg_catalog.pg_advisory_lock(lock_key);
+        RETURN 0;
+    ELSIF pg_catalog.pg_try_advisory_lock(lock_key) THEN
+        PERFORM pg_catalog.pg_advisory_unlock(lock_key);
+        RETURN 1;
+    ELSE
+        RETURN 0;
+    END IF;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION mysql.is_used_lock(text)
+RETURNS int
+STRICT VOLATILE LANGUAGE plpgsql
+AS $function$
+DECLARE
+    lock_key bigint := pg_catalog.hashtextextended($1, 0);
+BEGIN
+    IF pg_catalog.pg_advisory_unlock(lock_key) THEN
+        PERFORM pg_catalog.pg_advisory_lock(lock_key);
+        RETURN pg_catalog.pg_backend_pid();
+    ELSIF pg_catalog.pg_try_advisory_lock(lock_key) THEN
+        PERFORM pg_catalog.pg_advisory_unlock(lock_key);
+        RETURN NULL;
+    ELSE
+        RETURN 0;
+    END IF;
+END;
+$function$;

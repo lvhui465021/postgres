@@ -129,6 +129,12 @@ RETURNS text
 AS $$SELECT pg_catalog.encode($1, 'base64')$$
 LANGUAGE SQL IMMUTABLE STRICT;
 
+-- to_base64(text) -- MySQL TO_BASE64('abc') => 'YWJj'
+CREATE OR REPLACE FUNCTION mysql.to_base64(text)
+RETURNS text
+AS $$SELECT pg_catalog.encode(pg_catalog.convert_to($1, 'UTF8'), 'base64')$$
+LANGUAGE SQL IMMUTABLE STRICT;
+
 -- from_base64(text) -- MySQL FROM_BASE64('YWJj') => x'616263'::bytea
 CREATE OR REPLACE FUNCTION mysql.from_base64(text)
 RETURNS bytea
@@ -382,6 +388,14 @@ WHERE cl.relkind IN ('r', 'p')
   AND ns.nspname !~ '^pg_'
 ORDER BY 1, 2, 3, 4, 7;
 
+-- View: mys_informa_schema.db_status
+-- SHOW STATUS is backed by PostgreSQL's live GUC catalog.  This is a
+-- compatibility surface, not a second server-status store.
+CREATE OR REPLACE VIEW mys_informa_schema.db_status AS
+SELECT name::varchar(256) AS variable_name,
+       setting::text AS value
+FROM pg_catalog.pg_settings;
+
 -- -----------------------------------------------------------------------------
 -- Grants for mys_informa_schema
 -- -----------------------------------------------------------------------------
@@ -560,6 +574,19 @@ CREATE OR REPLACE FUNCTION mysql.json_unquote(json)
 RETURNS text
 AS 'SELECT trim(''"'' FROM $1::text)'
 LANGUAGE SQL;
+
+CREATE OR REPLACE FUNCTION mysql.json_path_extract_text(json, text)
+RETURNS text
+AS $$
+SELECT CASE WHEN $2 LIKE '$.%'
+            THEN pg_catalog.json_extract_path_text(
+                     $1,
+                     VARIADIC pg_catalog.string_to_array(
+                         pg_catalog.substr($2, 3), '.'))
+            ELSE pg_catalog.json_extract_path_text($1, $2)
+       END
+$$
+LANGUAGE SQL IMMUTABLE STRICT;
 
 -- INSTR(str, substr) -- returns position of first occurrence
 CREATE OR REPLACE FUNCTION mysql.instr(text, text)

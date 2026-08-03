@@ -37,6 +37,7 @@ typedef Datum (*timestamp_in_function)(PG_FUNCTION_ARGS);
 
 typedef struct ADTExtMethod
 {
+	/* Forward-compatible ADT slots retained for future dialect modules. */
 	pre_numeric_in_function		pre_numeric_in;
 	post_numeric_out_function	post_numeric_out;
 	pre_time_in_function		pre_time_in;

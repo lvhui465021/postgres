@@ -14,22 +14,20 @@
 
 #include "libpq/libpq-be.h"
 #include "miscadmin.h"               /* MyProcPort */
+#include "postmaster/compatibility.h"
 #include "postmaster/protocol_routine.h"
 
 /* ----------------------------------------------------------------
  *    Protocol routine registry
  *
- * The built-in PG protocol is registered at compile time so that
- * initdb and other standalone invocations work.
+ * The built-in PG protocol is a kernel fallback and is also inserted into
+ * the unified compatibility registry on first use, so initdb and other
+ * standalone invocations do not depend on module loading.
  * ----------------------------------------------------------------
  */
 static const ProtocolRoutine StandardProtocolRoutine = {
     .kind = COMPAT_PROTOCOL_POSTGRES,
     .name = "PostgreSQL",
-};
-
-static const ProtocolRoutine *protocol_routines[COMPAT_PROTOCOL_KIND_MAX] = {
-    [COMPAT_PROTOCOL_POSTGRES] = &StandardProtocolRoutine,
 };
 
 /* Hook for additional protocol listeners (MySQL, TDS, ...). */
@@ -42,9 +40,9 @@ listen_init_hook_type listen_init_hook = NULL;
 void
 RegisterProtocolRoutine(const ProtocolRoutine *routine)
 {
-    Assert(routine != NULL);
-    Assert(CompatibilityProtocolKindIsValid(routine->kind));
-    protocol_routines[routine->kind] = routine;
+	Assert(routine != NULL);
+	Assert(CompatibilityProtocolKindIsValid(routine->kind));
+	RegisterCompatibilityProtocol(routine->kind, routine);
 }
 
 /* ----------------------------------------------------------------
@@ -83,15 +81,22 @@ AssignProtocolRoutine(Port *port)
     Assert(port != NULL);
     Assert(CompatibilityProtocolKindIsValid(port->protocol_kind));
 
-    /*
-     * If no routine has been registered for the PG protocol yet (e.g. during
-     * initdb where _PG_init is not invoked for statically-linked code),
-     * register the built-in standard routine on first use.
-     */
-    if (protocol_routines[COMPAT_PROTOCOL_POSTGRES] == NULL)
-        RegisterProtocolRoutine(&StandardProtocolRoutine);
+	/*
+	 * If no routine has been registered for the PG protocol yet (e.g. during
+	 * initdb where _PG_init is not invoked for statically-linked code),
+	 * register the built-in standard routine on first use.  Inspect the
+	 * registry slot directly because GetProtocolRoutine() deliberately
+	 * provides the same standard fallback to callers.
+	 */
+	{
+		const CompatibilityRoutine *compat =
+			GetCompatibilityRoutine(COMPAT_PROTOCOL_POSTGRES);
 
-    port->protocol_routine = protocol_routines[port->protocol_kind];
+		if (compat == NULL || compat->protocol == NULL)
+			RegisterProtocolRoutine(&StandardProtocolRoutine);
+	}
+
+	port->protocol_routine = GetProtocolRoutine(port->protocol_kind);
 
     if (port->protocol_routine == NULL)
         elog(FATAL, "no ProtocolRoutine registered for protocol kind %d",
@@ -101,16 +106,26 @@ AssignProtocolRoutine(Port *port)
 /* ----------------------------------------------------------------
  *    GetProtocolRoutine
  *
- * Returns the registered ProtocolRoutine for the given protocol kind,
- * or NULL if none has been assigned yet.
+ * Returns the registered ProtocolRoutine for the given protocol kind.  The
+ * standard PostgreSQL routine is returned as a kernel fallback even before
+ * its lazy registry insertion; unregistered compatibility kinds return NULL.
  * ----------------------------------------------------------------
  */
 const ProtocolRoutine *
 GetProtocolRoutine(CompatibilityProtocolKind kind)
 {
-    if (!CompatibilityProtocolKindIsValid(kind))
-        return NULL;
-    return protocol_routines[kind];
+	if (!CompatibilityProtocolKindIsValid(kind))
+		return NULL;
+
+	{
+		const CompatibilityRoutine *compat = GetCompatibilityRoutine(kind);
+
+		if (compat != NULL && compat->protocol != NULL)
+			return compat->protocol;
+	}
+
+	/* The standard protocol is a kernel fallback, not a module contract. */
+	return kind == COMPAT_PROTOCOL_POSTGRES ? &StandardProtocolRoutine : NULL;
 }
 
 /* ----------------------------------------------------------------
@@ -125,7 +140,9 @@ CompatibilityProtocolKindIsValid(CompatibilityProtocolKind kind)
 }
 
 /*
- * _PG_init  –  register the built-in PG protocol at library load time.
+ * _PG_init  –  register the built-in PG protocol when the backend image is
+ * initialized.  AssignProtocolRoutine() retains the lazy fallback for
+ * statically-linked standalone callers that do not invoke this entry point.
  */
 void
 _PG_init(void)

@@ -27,7 +27,7 @@
 typedef struct MysParserExports
 {
 	/* DDL transformation helpers (mys_parse_utilcmd.c). */
-	Node *(*mys_transformCreateStmt)(CreateStmt *stmt, const char *queryString);
+	List *(*mys_transformCreateStmt)(CreateStmt *stmt, const char *queryString);
 	AlterTableStmt *(*mys_transformAlterTableStmt)(Oid relid,
 												   AlterTableStmt *stmt,
 												   const char *queryString,
@@ -36,7 +36,7 @@ typedef struct MysParserExports
 	List *(*mys_expandTableLikeClause)(RangeVar *heapRel,
 									   TableLikeClause *table_like_clause);
 
-	/* Namespace helper (mys_namespace_stubs.c). */
+	/* Namespace helper (mys_namespace.c). */
 	Oid (*getCurrentNamespaceOid)(void);
 
 	/* AUTO_INCREMENT / ON UPDATE CURRENT_TIMESTAMP builders. */

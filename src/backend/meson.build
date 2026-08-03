@@ -198,12 +198,18 @@ subdir('replication/pgoutput')
 subdir('snowball')
 subdir('utils/mb/conversion_procs')
 
-# Verify that every symbol imported by the MySQL-compatibility shared
-# libraries resolves against the postgres binary (G3 contract).
-test('mysql_kernel_exports',
-  find_program(join_paths(meson.project_source_root(), 'src', 'tools', 'check_mysql_kernel_exports.sh')),
-  args: [postgres, mysm],
-  depends: [postgres, mysm])
+# Ensure the compatibility vtables contain no declared-but-unconsumed slots.
+# This is the executable form of the stage-1 dead-contract invariant.
+test('mysql_vtable_contract',
+  find_program(join_paths(meson.project_source_root(), 'src', 'tools', 'check_mysql_vtable_contract.sh')),
+  args: [meson.project_source_root()])
+
+# Keep the single Meson build graph explicit: the parser keyword generator and
+# all loadable MySQL layers must be reachable from Meson, with no orphaned
+# parser Makefile/meson.build capable of diverging from it.
+test('mysql_build_graph_contract',
+  find_program(join_paths(meson.project_source_root(), 'src', 'tools', 'check_mysql_build_graph.sh')),
+  args: [meson.project_source_root()])
 
 # Detect silent semantic drift between the MySQL fork files and their
 # upstream counterparts (a merge conflict would self-report; drift does not).

@@ -135,6 +135,21 @@ single_target_update_join	1
 1 row in set
 
 --------------
+UPDATE LOW_PRIORITY mysql_dml_target SET note = 'low priority' WHERE code = 'a'
+--------------
+
+Query OK, 1 row affected
+
+--------------
+SELECT 'update_low_priority' AS test_name,
+       note = 'low priority' FROM mysql_dml_target WHERE code = 'a'
+--------------
+
+test_name	?column?
+update_low_priority	1
+1 row in set
+
+--------------
 SELECT value_int INTO @mysql_dml_selected
 FROM mysql_dml_target WHERE code = 'a'
 --------------
@@ -236,6 +251,27 @@ SELECT 'operators_and_coercion' AS test_name,
 test_name	passed
 operators_and_coercion	1
 1 row in set
+
+--------------
+SET sql_mode = ''
+--------------
+
+Query OK, 0 rows affected
+
+--------------
+SELECT 'numeric_prefix_conversion' AS test_name,
+       '12abc' + 0 = 12 AS passed
+--------------
+
+test_name	passed
+numeric_prefix_conversion	1
+1 row in set
+
+--------------
+SET sql_mode = DEFAULT
+--------------
+
+Query OK, 0 rows affected
 
 --------------
 SELECT 'logical_operators' AS test_name,

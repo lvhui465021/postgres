@@ -16,6 +16,7 @@
 #include "postgres.h"
 
 #include "parser/parsereng.h"
+#include "postmaster/compatibility.h"
 #include "utils/adtext.h"
 
 #include "miscadmin.h"
@@ -26,10 +27,6 @@ void InitADTExt(void);
 const ADTExtMethod *adtext = NULL;
 
 static const ADTExtMethod standard_adtext;
-
-/* Dialect ADT tables registered via RegisterADTExt(). */
-static const ADTExtMethod *dialect_adtext[COMPAT_PROTOCOL_KIND_MAX];
-
 
 /*
  * Standard ADT Extension: all hooks are NULL (pass-through to built-in
@@ -70,14 +67,14 @@ void
 RegisterADTExt(CompatibilityProtocolKind kind, const ADTExtMethod *table)
 {
 	Assert(kind >= 0 && kind < COMPAT_PROTOCOL_KIND_MAX);
-	dialect_adtext[kind] = table;
+	RegisterCompatibilityADTExt(kind, table);
 }
 
 void
 UnregisterADTExt(CompatibilityProtocolKind kind)
 {
 	Assert(kind >= 0 && kind < COMPAT_PROTOCOL_KIND_MAX);
-	dialect_adtext[kind] = NULL;
+	UnregisterCompatibilityADTExt(kind);
 }
 
 
@@ -91,7 +88,10 @@ UnregisterADTExt(CompatibilityProtocolKind kind)
 void
 InitADTExt(void)
 {
-	adtext = dialect_adtext[MyCompatMode];
+	const CompatibilityRoutine *compat =
+		GetCompatibilityRoutine(MyCompatMode);
+
+	adtext = compat != NULL ? compat->adtext : NULL;
 	if (adtext == NULL)
 		adtext = GetStandardADTExt();
 }

@@ -38,7 +38,9 @@ extern bool isIgnoreStmt;
 /* #include "parser/parser_helper.h" -- use parser/parser.h */
 #include "parser/mysql/mys_gramparse.h"
 #include "parser/mysql/mys_parser.h"
+#include "parser/mysql/mys_scanner.h"
 
+#include "lib/stringinfo.h"
 #include "storage/lmgr.h"
 #include "utils/date.h"
 #include "utils/datetime.h"
@@ -48,7 +50,7 @@ extern bool isIgnoreStmt;
 #include "utils/lsyscache.h"
 #include "miscadmin.h"
 
-/* M2 stub: will be properly migrated with MySQL namespace module */
+/* Namespace resolution is shared by metadata grammar actions and USE. */
 extern Oid getCurrentNamespaceOid(void);
 
 /*
@@ -232,18 +234,145 @@ static ResTarget *createResTargetWithInt(char *name, int val);
 static Node *mysqlMakeChecksumTableSelect(List *relations);
 static Node *mysqlMakeAdminTableSelect(List *relations, const char *operation);
 static Node *mysqlMakeAdminNoopStmt(void);
+static Node *mysqlMakeShowDatabases(const char *pattern);
+static Node *mysqlMakeSimpleTrigger(bool replace, char *trigname,
+									int16 timing, List *events, RangeVar *relation,
+									int row_location, core_yyscan_t yyscanner);
 //static ResTarget *createResTargetWithNULL(char *name);
 static ResTarget *createResTargetWithFunc2Args(char *name, char *funcShemaName, char *funcName, char *arg1, char *arg2);
 static RangeVar *createRangeVar(char *schemaName, char *tableName);
 static void checkJoinOn(JoinExpr *joinExpr, bool *hasNotOn);
 static void makeOnClause(Node **expr, JoinExpr *joinExpr);
 
+/*
+ * SHOW DATABASES is emitted as raw SQL because the PG18 reparse path avoids
+ * constructing a SelectStmt with version-sensitive permission fields.
+ * Quote the LIKE pattern before embedding it in that SQL text.
+ */
+static Node *
+mysqlMakeShowDatabases(const char *pattern)
+{
+	if (pattern != NULL)
+		return (Node *) makeString(psprintf(
+			"SELECT n.nspname AS Database "
+			"FROM pg_catalog.pg_namespace n "
+			"WHERE n.nspname !~ '^pg_' "
+			"AND n.nspname <> 'public' "
+			"AND n.nspname <> 'mys_informa_schema' "
+			"AND n.nspname ~~ %s "
+			"ORDER BY 1", quote_literal_cstr(pattern)));
+
+	return (Node *) makeString(pstrdup(
+		"SELECT n.nspname AS Database "
+		"FROM pg_catalog.pg_namespace n "
+		"WHERE n.nspname !~ '^pg_' "
+		"AND n.nspname <> 'public' "
+		"AND n.nspname <> 'mys_informa_schema' "
+		"ORDER BY 1"));
+}
+
+/*
+ * Lower the single-statement trigger form accepted by MySQL to PostgreSQL's
+ * trigger-function form.  The body is copied from the original scanner
+ * buffer, so NEW/OLD references remain valid PL/pgSQL references instead of
+ * being interpreted as ordinary SQL column names during raw parsing.
+ */
+static Node *
+mysqlMakeSimpleTrigger(bool replace, char *trigname, int16 timing,
+					   List *events, RangeVar *relation, int row_location,
+					   core_yyscan_t yyscanner)
+{
+	char	   *body;
+	char	   *function_name;
+	const char *function_qualified_name;
+	const char *relation_name;
+	char	   *function_body;
+	char	   *event_name;
+	int			body_length;
+	int			body_location;
+	const char *timing_name;
+	const char *create_prefix = replace ? "CREATE OR REPLACE" : "CREATE";
+
+	/*
+	 * InsertStmt starts with the optional WITH clause.  Since that clause is
+	 * empty for the MySQL single-statement trigger form, its Bison location is
+	 * -1.  Use the ROW token location and advance over ROW/whitespace instead.
+	 */
+	if (row_location < 0)
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("could not locate MySQL trigger body")));
+	body_location = row_location + strlen("ROW");
+	{
+		mys_yy_extra_type *yyextra = mys_yyget_extra(yyscanner);
+
+		while (isspace((unsigned char) yyextra->core_yy_extra.scanbuf[body_location]))
+			body_location++;
+	}
+	body = mys_make_pl_block_str(yyscanner, body_location);
+	body_length = strlen(body);
+	while (body_length > 0 && isspace((unsigned char) body[body_length - 1]))
+		body[--body_length] = '\0';
+	if (body_length > 0 && body[body_length - 1] == ';')
+	{
+		body[--body_length] = '\0';
+		while (body_length > 0 && isspace((unsigned char) body[body_length - 1]))
+			body[--body_length] = '\0';
+	}
+
+	function_name = makeObjectName("__mysql_trigger", relation->relname,
+								   trigname);
+	if (relation->schemaname != NULL)
+	{
+		function_qualified_name = quote_qualified_identifier(relation->schemaname,
+															function_name);
+		relation_name = quote_qualified_identifier(relation->schemaname,
+															   relation->relname);
+	}
+	else
+	{
+		function_qualified_name = quote_identifier(function_name);
+		relation_name = quote_identifier(relation->relname);
+	}
+
+	if (timing == TRIGGER_TYPE_BEFORE)
+		timing_name = "BEFORE";
+	else if (timing == TRIGGER_TYPE_INSTEAD)
+		timing_name = "INSTEAD OF";
+	else
+		timing_name = "AFTER";
+
+	event_name = pstrdup("");
+	if (intVal(linitial(events)) & TRIGGER_TYPE_INSERT)
+		event_name = psprintf("%sINSERT", event_name);
+	if (intVal(linitial(events)) & TRIGGER_TYPE_UPDATE)
+		event_name = psprintf("%s%sUPDATE", event_name,
+																*event_name ? " OR " : "");
+	if (intVal(linitial(events)) & TRIGGER_TYPE_DELETE)
+		event_name = psprintf("%s%sDELETE", event_name,
+																*event_name ? " OR " : "");
+	if (intVal(linitial(events)) & TRIGGER_TYPE_TRUNCATE)
+		event_name = psprintf("%s%sTRUNCATE", event_name,
+																*event_name ? " OR " : "");
+
+	function_body = psprintf("BEGIN\n%s%s\nRETURN NEW;\nEND",
+							 body, body_length > 0 ? ";" : "");
+
+	return (Node *) makeString(psprintf(
+			"%s FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS %s; "
+			"%s TRIGGER %s %s %s ON %s FOR EACH ROW EXECUTE FUNCTION %s()",
+			create_prefix, function_qualified_name,
+			quote_literal_cstr(function_body),
+			create_prefix, quote_identifier(trigname), timing_name, event_name,
+			relation_name, function_qualified_name));
+}
+
 %}
 
 %pure-parser
-/* 期待的shift/reduce数量，CreateFunctionStmt语句 */
+/* 期待的shift/reduce数量，CreateFunctionStmt and MySQL trigger forms */
 /* joined_table: */
-%expect 47
+%expect 48
 
 %name-prefix="mys_yy"
 
@@ -2721,20 +2850,9 @@ VariableShowStmt:
 		;
 
 DBTableInfoShowStmt:
-			SHOW DATABASES
+			SHOW DATABASES show_like_clause
 				{
-					/*
-					 * PG16: Emit SQL text instead of programmatic SelectStmt
-					 * to work around RTEPermissionInfo compatibility issue.
-					 * Re-parsed by standard parser in mys_raw_parser post-processing.
-					 */
-					$$ = (Node *) makeString(pstrdup(
-						"SELECT n.nspname AS Database "
-						"FROM pg_catalog.pg_namespace n "
-						"WHERE n.nspname !~ '^pg_' "
-						"AND n.nspname <> 'public' "
-						"AND n.nspname <> 'mys_informa_schema' "
-						"ORDER BY 1"));
+					$$ = mysqlMakeShowDatabases($3);
 				}
 			| SHOW TABLES show_from_db_clause show_like_clause where_clause
 				{
@@ -5687,7 +5805,7 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
                     n->relation = $4;
                     n->tableElts = $8;
                     n->inhRelations = list_make1($7);
-                    n->partbound = ((PartitionCmd *)$9)->bound;
+					n->partbound = $9;
                     n->partspec = $10;
                     n->ofTypename = NULL;
                     n->constraints = NIL;
@@ -5707,7 +5825,7 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
                     n->relation = $7;
                     n->tableElts = $11;
                     n->inhRelations = list_make1($10);
-                    n->partbound = ((PartitionCmd *)$12)->bound;
+					n->partbound = $12;
                     n->partspec = $13;
                     n->ofTypename = NULL;
                     n->constraints = NIL;
@@ -8623,6 +8741,13 @@ am_type:
  *****************************************************************************/
 
 CreateTrigStmt:
+			CREATE opt_or_replace TRIGGER name TriggerActionTime TriggerEvents ON
+			qualified_name FOR EACH ROW InsertStmt
+				{
+					$$ = mysqlMakeSimpleTrigger($2, $4, $5, $6, $8, @11,
+																 yyscanner);
+				}
+		  |
 			CREATE opt_or_replace TRIGGER name TriggerActionTime TriggerEvents ON
 			qualified_name TriggerReferencing TriggerForSpec TriggerWhen
 			EXECUTE FUNCTION_or_PROCEDURE func_name '(' TriggerFuncArgs ')'
@@ -15868,6 +15993,9 @@ MysUpdateStmt:
 update_options:
             /* empty */ { isIgnoreStmt = false; }
             | IGNORE    { isIgnoreStmt = true; }
+			| LOW_PRIORITY { isIgnoreStmt = false; }
+			| LOW_PRIORITY IGNORE { isIgnoreStmt = true; }
+			| IGNORE LOW_PRIORITY { isIgnoreStmt = true; }
         ;
 
 update_join_type:
@@ -18088,18 +18216,19 @@ MySQLConvertType:
 					$$->location = @1;
                 }
 			| UNSIGNED
-				{
-					$$ = SystemTypeName("int8");
+			{
+					/* UNSIGNED BIGINT values need up to 64 bits plus a sign. */
+					$$ = SystemTypeName("numeric");
 					$$->location = @1;
 				}
             | UNSIGNED INT_P
                 {
-                    $$ = SystemTypeName("int8");
+					$$ = SystemTypeName("numeric");
 					$$->location = @1;
                 }
             | UNSIGNED INTEGER
                 {
-                    $$ = SystemTypeName("int8");
+					$$ = SystemTypeName("numeric");
 					$$->location = @1;
                 }
 			| DECIMAL_P opt_type_modifiers

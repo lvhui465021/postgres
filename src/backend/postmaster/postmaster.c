@@ -1454,7 +1454,8 @@ ListenProtocolServerPort(CompatibilityProtocolKind kind, int family,
 /*
  * InitializeProtocolListeners -- called once during postmaster startup
  * to initialize the protocol-routine registry.
- * The standard PG routine is registered by _PG_init() in protocol_routine.c.
+ * The standard PG routine is supplied by the protocol-routine kernel
+ * fallback and inserted into the unified registry on first use.
  */
 static void
 InitializeProtocolListeners(void)

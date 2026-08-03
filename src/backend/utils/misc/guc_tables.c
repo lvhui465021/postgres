@@ -503,8 +503,8 @@ static const struct config_enum_entry file_extend_method_options[] = {
 };
 
 static const struct config_enum_entry database_compat_mode_options[] = {
-	{"postgresql", POSTGRESQL_COMPAT_MODE, false},
-	{"mysql", MYSQL_COMPAT_MODE, false},
+	{"postgresql", COMPAT_PROTOCOL_POSTGRES, false},
+	{"mysql", COMPAT_PROTOCOL_MYSQL, false},
 	{NULL, 0, false}
 };
 
@@ -5510,7 +5510,7 @@ struct config_enum ConfigureNamesEnum[] =
 			GUC_SUPERUSER_ONLY
 		},
 		&database_compat_mode,
-		POSTGRESQL_COMPAT_MODE, database_compat_mode_options,
+		COMPAT_PROTOCOL_POSTGRES, database_compat_mode_options,
 		NULL, NULL, NULL
 	},
 

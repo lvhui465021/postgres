@@ -2399,6 +2399,9 @@ timetz_out(PG_FUNCTION_ARGS)
 	int			tz;
 	char		buf[MAXDATELEN + 1];
 
+	if (adtext != NULL && adtext->post_timetz_out != NULL)
+		PG_RETURN_CSTRING(adtext->post_timetz_out((void *) time));
+
 	timetz2tm(time, tm, &fsec, &tz);
 	EncodeTimeOnly(tm, fsec, true, tz, DateStyle, buf);
 

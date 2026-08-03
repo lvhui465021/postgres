@@ -63,13 +63,20 @@ SELECT 'hex_string' AS test_name,
 SELECT 'encoding_functions' AS test_name,
        UNHEX(CAST('616263' AS CHAR)) = CAST('abc' AS BINARY)
        AND FROM_BASE64(CAST('YWJj' AS CHAR)) = CAST('abc' AS BINARY) AS passed;
+SELECT 'base64_text' AS test_name,
+       TO_BASE64(CAST('abc' AS CHAR)) = 'YWJj' AS passed;
+SELECT 'unsigned_cast' AS test_name,
+       CAST(18446744073709551615 AS UNSIGNED) = 18446744073709551615 AS passed;
+SELECT 'load_file_missing_returns_null' AS test_name,
+       LOAD_FILE('/mysql-compat-file-does-not-exist') IS NULL AS passed;
 SELECT 'repeat_untyped_literal' AS test_name,
        repeat('ab', 3) = 'ababab' AS passed;
 SELECT 'json' AS test_name,
        json_object('key', 1) IS NOT NULL
        AND json(42) IS NOT NULL
        AND mysql.json_unquote(json_object('key', 'text')->'key') = 'text'
-       AND json_object('key', 'text')->>'key' = 'text' AS passed;
+       AND json_object('key', 'text')->>'key' = 'text'
+       AND json_object('key', 'text')->>'$.key' = 'text' AS passed;
 
 SELECT 'date_time_arithmetic' AS test_name,
        mysql.date_add('2024-01-01', INTERVAL 2 DAY) = '2024-01-03'
@@ -150,6 +157,9 @@ SELECT 'bit_aggregate_functions' AS test_name,
 FROM mysql_function_bit_aggregate WHERE grp = 1;
 
 SELECT 'named_locks' AS test_name, mysql.get_lock('mysql_compat_lock', 0) = 1 AS passed;
+SELECT 'named_lock_state' AS test_name,
+       mysql.is_used_lock('mysql_compat_lock') IS NOT NULL
+       AND mysql.is_free_lock('mysql_compat_lock') = 0 AS passed;
 SELECT 'named_lock_release' AS test_name, mysql.release_lock('mysql_compat_lock') = 1 AS passed;
 SELECT 'named_lock_free' AS test_name,
        mysql.is_free_lock('mysql_compat_lock') = 1 AS passed;

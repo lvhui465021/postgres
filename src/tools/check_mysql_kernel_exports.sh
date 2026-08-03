@@ -31,7 +31,7 @@ sys_lib_defined() {
         [ -e "$lib" ] || continue
         # Symbol names may carry version suffixes (e.g. ceil@@GLIBC_2.2.5).
         if nm -D --defined-only "$lib" 2>/dev/null |
-            awk '{print $3}' | sed 's/@.*//' | grep -qx "$1"; then
+            awk '{print $3}' | sed 's/@.*//' | grep -x "$1" >/dev/null; then
             return 0
         fi
     done
@@ -52,7 +52,9 @@ for so in "$@"; do
             __* | _fini | _init | _ITM_*) continue ;;
             *@GLIBC* | *@GCC* | *@GLIBCXX* | *@CXXABI*) continue ;;
         esac
-        if ! echo "$exported" | grep -qx "$sym" && ! sys_lib_defined "$sym"; then
+        # Do not use grep -q here: the producer is a shell builtin and a
+        # short-circuiting grep would make it report a misleading SIGPIPE.
+        if ! printf '%s\n' "$exported" | grep -x "$sym" >/dev/null && ! sys_lib_defined "$sym"; then
             echo "ERROR: $so imports '$sym' which postgres does not export"
             fail=1
         fi

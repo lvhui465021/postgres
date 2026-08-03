@@ -43,6 +43,7 @@ SHOW CREATE FUNCTION mysql_metadata_function;
 SHOW CREATE PROCEDURE mysql_metadata_procedure;
 SHOW CREATE TRIGGER aitmysql_metadata_table;
 SHOW DATABASES;
+SHOW DATABASES LIKE 'mysql_compat_%';
 SHOW CHARACTER SET;
 SHOW COLLATION;
 SHOW ENGINES;
@@ -50,6 +51,9 @@ SHOW STORAGE ENGINES;
 SHOW PLUGINS;
 SHOW SESSION VARIABLES LIKE 'sql_mode';
 SHOW GLOBAL VARIABLES LIKE 'sql_mode';
+SHOW STATUS LIKE 'server_version';
+SHOW SESSION STATUS LIKE 'server_version';
+SHOW GLOBAL STATUS LIKE 'server_version';
 SHOW PROCESSLIST;
 SHOW FULL PROCESSLIST;
 SHOW TRIGGERS;
@@ -67,6 +71,11 @@ SELECT 'metadata_indexes' AS test_name,
        COUNT(*) = 3 AS passed
 FROM mys_informa_schema.indexs
 WHERE schema_name = 'mysql_compat_metadata'
+  AND table_name = 'mysql_metadata_table';
+SELECT 'information_schema_statistics' AS test_name,
+       COUNT(*) >= 2 AS passed
+FROM information_schema.statistics
+WHERE table_schema = 'mysql_compat_metadata'
   AND table_name = 'mysql_metadata_table';
 SELECT 'metadata_view' AS test_name,
        COUNT(*) = 1 AS passed
