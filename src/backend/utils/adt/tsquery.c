@@ -548,12 +548,12 @@ pushValue_internal(TSQueryParserState state, pg_crc32 valcrc, int distance, int 
 {
 	QueryOperand *tmp;
 
-	if (distance >= MAXSTRPOS)
+	if (distance > MAXSTRPOS)
 		ereturn(state->escontext,,
 				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
 				 errmsg("value is too big in tsquery: \"%s\"",
 						state->buffer)));
-	if (lenval >= MAXSTRLEN)
+	if (lenval > MAXSTRLEN)
 		ereturn(state->escontext,,
 				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
 				 errmsg("operand is too long in tsquery: \"%s\"",
@@ -581,7 +581,7 @@ pushValue(TSQueryParserState state, char *strval, int lenval, int16 weight, bool
 {
 	pg_crc32	valcrc;
 
-	if (lenval >= MAXSTRLEN)
+	if (lenval > MAXSTRLEN)
 		ereturn(state->escontext,,
 				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
 				 errmsg("word is too long in tsquery: \"%s\"",
@@ -1272,6 +1272,9 @@ tsqueryrecv(PG_FUNCTION_ARGS)
 			if (weight > 0xF)
 				elog(ERROR, "invalid tsquery: invalid weight bitmap");
 
+			if (val_len == 0)
+				elog(ERROR, "invalid tsquery: empty operand");
+
 			if (val_len > MAXSTRLEN)
 				elog(ERROR, "invalid tsquery: operand too long");
 
@@ -1311,7 +1314,14 @@ tsqueryrecv(PG_FUNCTION_ARGS)
 
 			item->qoperator.oper = oper;
 			if (oper == OP_PHRASE)
-				item->qoperator.distance = (int16) pq_getmsgint(buf, sizeof(int16));
+			{
+				unsigned int dist = pq_getmsgint(buf, sizeof(int16));
+
+				if (dist > MAXENTRYPOS)
+					elog(ERROR, "invalid tsquery: invalid phrase distance %u",
+						 dist);
+				item->qoperator.distance = (int16) dist;
+			}
 		}
 		else
 			elog(ERROR, "unrecognized tsquery node type: %d", item->type);

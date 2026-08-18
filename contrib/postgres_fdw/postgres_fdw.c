@@ -3933,7 +3933,7 @@ fetch_more_data(ForeignScanState *node)
 
 	/* Convert the data into HeapTuples */
 	numrows = PQntuples(res);
-	fsstate->tuples = (HeapTuple *) palloc0(numrows * sizeof(HeapTuple));
+	fsstate->tuples = palloc0_array(HeapTuple, numrows);
 	fsstate->num_tuples = numrows;
 	fsstate->next_tuple = 0;
 
@@ -4345,7 +4345,7 @@ convert_prep_stmt_params(PgFdwModifyState *fmstate,
 
 	oldcontext = MemoryContextSwitchTo(fmstate->temp_cxt);
 
-	p_values = (const char **) palloc(sizeof(char *) * fmstate->p_nums * numSlots);
+	p_values = palloc_array(const char *, fmstate->p_nums * numSlots);
 
 	/* ctid is provided only for UPDATE/DELETE, which don't allow batching */
 	Assert(!(tupleid != NULL && numSlots > 1));
@@ -4738,8 +4738,7 @@ init_returning_filter(PgFdwDirectModifyState *dmstate,
 	 *
 	 * Also get the indexes of the entries for ctid and oid if any.
 	 */
-	dmstate->attnoMap = (AttrNumber *)
-		palloc0(resultTupType->natts * sizeof(AttrNumber));
+	dmstate->attnoMap = palloc0_array(AttrNumber, resultTupType->natts);
 
 	dmstate->ctidAttno = dmstate->oidAttno = 0;
 
@@ -4928,7 +4927,7 @@ prepare_query_params(PlanState *node,
 	*param_exprs = ExecInitExprList(fdw_exprs, node);
 
 	/* Allocate buffer for text form of query parameters. */
-	*param_values = (const char **) palloc0(numParams * sizeof(char *));
+	*param_values = palloc0_array(const char *, numParams);
 }
 
 /*
@@ -5458,7 +5457,7 @@ analyze_row_processor(PGresult *res, int row, PgFdwAnalyzeState *astate)
 
 /*
  * postgresImportForeignStatistics
- * 		Attempt to fetch/restore remote statistics instead of sampling.
+ * 		Attempt to import remote statistics instead of sampling.
  */
 static bool
 postgresImportForeignStatistics(Relation relation, List *va_cols, int elevel)
@@ -5471,7 +5470,7 @@ postgresImportForeignStatistics(Relation relation, List *va_cols, int elevel)
 	RemoteAttributeMapping *remattrmap = NULL;
 	int			attrcnt = 0;
 	TimestampTz starttime = 0;
-	bool		restore_stats = false;
+	bool		import_stats = false;
 	bool		ok = false;
 	ListCell   *lc;
 
@@ -5481,7 +5480,7 @@ postgresImportForeignStatistics(Relation relation, List *va_cols, int elevel)
 	server = GetForeignServer(table->serverid);
 
 	/*
-	 * Check whether the restore_stats option is enabled on the foreign table.
+	 * Check whether the import_stats option is enabled on the foreign table.
 	 * If not, silently ignore the foreign table.
 	 *
 	 * Server-level options can be overridden by table-level options, so check
@@ -5491,9 +5490,9 @@ postgresImportForeignStatistics(Relation relation, List *va_cols, int elevel)
 	{
 		DefElem    *def = (DefElem *) lfirst(lc);
 
-		if (strcmp(def->defname, "restore_stats") == 0)
+		if (strcmp(def->defname, "import_stats") == 0)
 		{
-			restore_stats = defGetBoolean(def);
+			import_stats = defGetBoolean(def);
 			break;
 		}
 	}
@@ -5501,13 +5500,13 @@ postgresImportForeignStatistics(Relation relation, List *va_cols, int elevel)
 	{
 		DefElem    *def = (DefElem *) lfirst(lc);
 
-		if (strcmp(def->defname, "restore_stats") == 0)
+		if (strcmp(def->defname, "import_stats") == 0)
 		{
-			restore_stats = defGetBoolean(def);
+			import_stats = defGetBoolean(def);
 			break;
 		}
 	}
-	if (!restore_stats)
+	if (!import_stats)
 		return false;
 
 	/*
@@ -8403,8 +8402,8 @@ make_tuple_from_result_row(PGresult *res,
 		tupdesc = fsstate->ss.ss_ScanTupleSlot->tts_tupleDescriptor;
 	}
 
-	values = (Datum *) palloc0(tupdesc->natts * sizeof(Datum));
-	nulls = (bool *) palloc(tupdesc->natts * sizeof(bool));
+	values = palloc0_array(Datum, tupdesc->natts);
+	nulls = palloc_array(bool, tupdesc->natts);
 	/* Initialize to nulls for any columns not present in result */
 	memset(nulls, true, tupdesc->natts * sizeof(bool));
 

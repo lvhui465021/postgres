@@ -871,11 +871,17 @@ CreateSubscription(ParseState *pstate, CreateSubscriptionStmt *stmt,
 	values[Anum_pg_subscription_subretentionactive - 1] =
 		BoolGetDatum(opts.retaindeadtuples);
 	values[Anum_pg_subscription_subserver - 1] = ObjectIdGetDatum(serverid);
-	if (!OidIsValid(serverid))
+	if (stmt->conninfo)
+	{
+		Assert(stmt->conninfo == conninfo && !OidIsValid(serverid));
 		values[Anum_pg_subscription_subconninfo - 1] =
-			CStringGetTextDatum(conninfo);
+			CStringGetTextDatum(stmt->conninfo);
+	}
 	else
+	{
+		Assert(OidIsValid(serverid));
 		nulls[Anum_pg_subscription_subconninfo - 1] = true;
+	}
 	if (opts.slot_name)
 		values[Anum_pg_subscription_subslotname - 1] =
 			DirectFunctionCall1(namein, CStringGetDatum(opts.slot_name));
@@ -1169,8 +1175,8 @@ AlterSubscription_refresh(Subscription *sub, bool copy_data,
 		 * allocate separate arrays for table OIDs and sequence OIDs based on
 		 * the total number of relations (subrel_count).
 		 */
-		subrel_local_oids = palloc(subrel_count * sizeof(Oid));
-		subseq_local_oids = palloc(subrel_count * sizeof(Oid));
+		subrel_local_oids = palloc_array(Oid, subrel_count);
+		subseq_local_oids = palloc_array(Oid, subrel_count);
 		foreach(lc, subrel_states)
 		{
 			SubscriptionRelState *relstate = (SubscriptionRelState *) lfirst(lc);
@@ -1202,7 +1208,7 @@ AlterSubscription_refresh(Subscription *sub, bool copy_data,
 		 * step.
 		 */
 		off = 0;
-		pubrel_local_oids = palloc(list_length(pubrels) * sizeof(Oid));
+		pubrel_local_oids = palloc_array(Oid, list_length(pubrels));
 
 		foreach_ptr(PublicationRelKind, pubrelinfo, pubrels)
 		{
