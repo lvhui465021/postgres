@@ -177,7 +177,7 @@ typedef struct ReorderBufferIterTXNState
 /* toast datastructures */
 typedef struct ReorderBufferToastEnt
 {
-	Oid			chunk_id;		/* toast_table.chunk_id */
+	Oid8		chunk_id;		/* toast_table.chunk_id */
 	int32		last_chunk_seq; /* toast_table.chunk_seq of the last chunk we
 								 * have seen */
 	Size		num_chunks;		/* number of chunks we've already seen */
@@ -2132,26 +2132,36 @@ ReorderBufferSaveTXNSnapshot(ReorderBuffer *rb, ReorderBufferTXN *txn,
 }
 
 /*
- * Mark the given transaction as streamed if it's a top-level transaction
- * or has changes.
+ * Mark the given transaction as streamed, if appropriate.
+ *
+ * A top-level transaction is always marked.  A subtransaction is marked
+ * only when it has changes and its top-level transaction is already
+ * marked as streamed.
  */
 static void
 ReorderBufferMaybeMarkTXNStreamed(ReorderBuffer *rb, ReorderBufferTXN *txn)
 {
 	/*
-	 * The top-level transaction, is marked as streamed always, even if it
-	 * does not contain any changes (that is, when all the changes are in
-	 * subtransactions).
-	 *
-	 * For subtransactions, we only mark them as streamed when there are
-	 * changes in them.
-	 *
-	 * We do it this way because of aborts - we don't want to send aborts for
-	 * XIDs the downstream is not aware of. And of course, it always knows
-	 * about the top-level xact (we send the XID in all messages), but we
-	 * never stream XIDs of empty subxacts.
+	 * The top-level transaction is marked as streamed always, even if it does
+	 * not contain any changes (that is, when all the changes are in
+	 * subtransactions).  The downstream always knows about it, since we send
+	 * its XID in every message.
 	 */
-	if (rbtxn_is_toptxn(txn) || (txn->nentries_mem != 0))
+	if (rbtxn_is_toptxn(txn))
+	{
+		/* We only reach here when streaming is supported. */
+		Assert(ReorderBufferCanStream(rb));
+		txn->txn_flags |= RBTXN_IS_STREAMED;
+		return;
+	}
+
+	/*
+	 * A subtransaction is marked only when it has changes, and only when its
+	 * top-level transaction has already been marked as streamed.  We never
+	 * stream XIDs of empty subxacts, and we must not send an abort for an XID
+	 * the downstream has never heard of.
+	 */
+	if (txn->nentries_mem != 0 && rbtxn_is_streamed(rbtxn_get_toptxn(txn)))
 		txn->txn_flags |= RBTXN_IS_STREAMED;
 }
 
@@ -2492,7 +2502,10 @@ ReorderBufferProcessTXN(ReorderBuffer *rb, ReorderBufferTXN *txn,
 								elog(ERROR, "could not open relation with OID %u", relid);
 
 							if (!RelationIsLogicallyLogged(rel))
+							{
+								RelationClose(rel);
 								continue;
+							}
 
 							relations[nrelations++] = rel;
 						}
@@ -4997,7 +5010,7 @@ ReorderBufferToastInitHash(ReorderBuffer *rb, ReorderBufferTXN *txn)
 
 	Assert(txn->toast_hash == NULL);
 
-	hash_ctl.keysize = sizeof(Oid);
+	hash_ctl.keysize = sizeof(Oid8);
 	hash_ctl.entrysize = sizeof(ReorderBufferToastEnt);
 	hash_ctl.hcxt = rb->context;
 	txn->toast_hash = hash_create("ReorderBufferToastHash", 5, &hash_ctl,
@@ -5021,8 +5034,10 @@ ReorderBufferToastAppendChunk(ReorderBuffer *rb, ReorderBufferTXN *txn,
 	bool		isnull;
 	Pointer		chunk;
 	TupleDesc	desc = RelationGetDescr(relation);
-	Oid			chunk_id;
+	Oid8		chunk_id;
 	int32		chunk_seq;
+	Oid			valueid_type;
+	Datum		valueid_datum;
 
 	if (txn->toast_hash == NULL)
 		ReorderBufferToastInitHash(rb, txn);
@@ -5030,7 +5045,12 @@ ReorderBufferToastAppendChunk(ReorderBuffer *rb, ReorderBufferTXN *txn,
 	Assert(IsToastRelation(relation));
 
 	newtup = change->data.tp.newtuple;
-	chunk_id = DatumGetObjectId(fastgetattr(newtup, 1, desc, &isnull));
+	valueid_type = TupleDescAttr(desc, 0)->atttypid;
+	valueid_datum = fastgetattr(newtup, 1, desc, &isnull);
+	if (valueid_type == OID8OID)
+		chunk_id = DatumGetObjectId8(valueid_datum);
+	else
+		chunk_id = DatumGetObjectId(valueid_datum);
 	Assert(!isnull);
 	chunk_seq = DatumGetInt32(fastgetattr(newtup, 2, desc, &isnull));
 	Assert(!isnull);
@@ -5048,11 +5068,11 @@ ReorderBufferToastAppendChunk(ReorderBuffer *rb, ReorderBufferTXN *txn,
 		dlist_init(&ent->chunks);
 
 		if (chunk_seq != 0)
-			elog(ERROR, "got sequence entry %d for toast chunk %u instead of seq 0",
+			elog(ERROR, "got sequence entry %d for toast chunk " OID8_FORMAT " instead of seq 0",
 				 chunk_seq, chunk_id);
 	}
 	else if (found && chunk_seq != ent->last_chunk_seq + 1)
-		elog(ERROR, "got sequence entry %d for toast chunk %u instead of seq %d",
+		elog(ERROR, "got sequence entry %d for toast chunk " OID8_FORMAT " instead of seq %d",
 			 chunk_seq, chunk_id, ent->last_chunk_seq + 1);
 
 	chunk = DatumGetPointer(fastgetattr(newtup, 3, desc, &isnull));
@@ -5155,12 +5175,13 @@ ReorderBufferToastReplace(ReorderBuffer *rb, ReorderBufferTXN *txn,
 		varlena    *varlena_pointer;
 
 		/* va_rawsize is the size of the original datum -- including header */
-		varatt_external toast_pointer;
+		toast_external_data toast_ext_data;
 		varatt_indirect redirect_pointer;
 		varlena    *new_datum = NULL;
 		varlena    *reconstructed;
 		dlist_iter	it;
 		Size		data_done = 0;
+		Oid8		toast_valueid;
 
 		if (attr->attisdropped)
 			continue;
@@ -5177,17 +5198,18 @@ ReorderBufferToastReplace(ReorderBuffer *rb, ReorderBufferTXN *txn,
 		varlena_pointer = (varlena *) DatumGetPointer(attrs[natt]);
 
 		/* no need to do anything if the tuple isn't external */
-		if (!VARATT_IS_EXTERNAL(varlena_pointer))
+		if (!VARATT_IS_EXTERNAL_ONDISK(varlena_pointer))
 			continue;
 
-		VARATT_EXTERNAL_GET_POINTER(toast_pointer, varlena_pointer);
+		toast_external_info_get(varlena_pointer, &toast_ext_data);
+		toast_valueid = toast_ext_data.valueid;
 
 		/*
 		 * Check whether the toast tuple changed, replace if so.
 		 */
 		ent = (ReorderBufferToastEnt *)
 			hash_search(txn->toast_hash,
-						&toast_pointer.va_valueid,
+						&toast_valueid,
 						HASH_FIND,
 						NULL);
 		if (ent == NULL)
@@ -5198,7 +5220,7 @@ ReorderBufferToastReplace(ReorderBuffer *rb, ReorderBufferTXN *txn,
 
 		free[natt] = true;
 
-		reconstructed = palloc0(toast_pointer.va_rawsize);
+		reconstructed = palloc0(toast_ext_data.rawsize);
 
 		ent->reconstructed = reconstructed;
 
@@ -5223,10 +5245,10 @@ ReorderBufferToastReplace(ReorderBuffer *rb, ReorderBufferTXN *txn,
 				   VARSIZE(chunk) - VARHDRSZ);
 			data_done += VARSIZE(chunk) - VARHDRSZ;
 		}
-		Assert(data_done == VARATT_EXTERNAL_GET_EXTSIZE(toast_pointer));
+		Assert(data_done == VARATT_EXTINFO_GET_EXTSIZE(toast_ext_data.extinfo));
 
 		/* make sure its marked as compressed or not */
-		if (VARATT_EXTERNAL_IS_COMPRESSED(toast_pointer))
+		if (VARATT_EXTINFO_IS_COMPRESSED(toast_ext_data.extinfo, toast_ext_data.rawsize))
 			SET_VARSIZE_COMPRESSED(reconstructed, data_done + VARHDRSZ);
 		else
 			SET_VARSIZE(reconstructed, data_done + VARHDRSZ);

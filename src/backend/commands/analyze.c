@@ -243,7 +243,7 @@ analyze_rel(Oid relid, RangeVar *relation,
 			if (!ok)
 			{
 				ereport(WARNING,
-						errmsg("skipping \"%s\" -- cannot analyze this foreign table.",
+						errmsg("skipping \"%s\" --- cannot analyze this foreign table",
 							   RelationGetRelationName(onerel)));
 				relation_close(onerel, ShareUpdateExclusiveLock);
 				goto out;
@@ -1171,6 +1171,11 @@ examine_attribute(Relation onerel, int attnum, Node *index_expr)
 	return stats;
 }
 
+/*
+ * Determine whether the column is analyzable.
+ *
+ * If the column is analyzable, return its attstattarget value, if asked to.
+ */
 bool
 attribute_is_analyzable(Relation onerel, int attnum, Form_pg_attribute attr,
 						int *p_attstattarget)

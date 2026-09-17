@@ -159,6 +159,7 @@ static bool cluster_rel_recheck(RepackCommand cmd, Relation OldHeap,
 								int options);
 static void check_concurrent_repack_requirements(Relation rel,
 												 Oid *ident_idx_p);
+static void check_index_requirements(Relation rel, RepackCommand cmd);
 static void rebuild_relation(Relation OldHeap, Relation index, bool verbose,
 							 Oid ident_idx);
 static void copy_table_data(Relation NewHeap, Relation OldHeap, Relation OldIndex,
@@ -173,7 +174,8 @@ static List *get_tables_to_repack_partitioned(RepackStmt *stmt,
 											  Relation rel,
 											  MemoryContext permcxt);
 static bool repack_is_permitted_for_relation(RepackCommand cmd,
-											 Oid relid, Oid userid);
+											 Oid relid, Oid userid,
+											 bool already_locked);
 
 static void apply_concurrent_changes(BufFile *file, ChangeContext *chgcxt);
 static void apply_concurrent_insert(Relation rel, TupleTableSlot *slot,
@@ -302,7 +304,7 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 	if ((params.options & CLUOPT_CONCURRENT) != 0)
 	{
 		/*
-		 * Make sure we're not in a transaction block.
+		 * In concurrent mode, make sure we're not in a transaction block.
 		 *
 		 * The reason is that repack_setup_logical_decoding() could wait
 		 * indefinitely for our XID to complete. (The deadlock detector would
@@ -312,6 +314,17 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 		 * to understand and we don't lose any functionality.
 		 */
 		PreventInTransactionBlock(isTopLevel, "REPACK (CONCURRENTLY)");
+	}
+	else if ((params.options & CLUOPT_ANALYZE) != 0)
+	{
+		/*
+		 * With ANALYZE, process_single_relation() would commit the current
+		 * transaction and start a new one, which would break our state if
+		 * we're in a transaction block or PL-execution environment.  Reject
+		 * the option in that case.  It may be possible to remove this
+		 * restriction in the future.
+		 */
+		PreventInTransactionBlock(isTopLevel, "REPACK (ANALYZE)");
 	}
 
 	/*
@@ -499,6 +512,11 @@ cluster_rel(RepackCommand cmd, Relation OldHeap, Oid indexOid,
 	bool		recheck = ((params->options & CLUOPT_RECHECK) != 0);
 	bool		concurrent = ((params->options & CLUOPT_CONCURRENT) != 0);
 	Oid			ident_idx = InvalidOid;
+	const int	progress_index[] = {
+		PROGRESS_REPACK_COMMAND,
+		PROGRESS_REPACK_INDEX_RELID
+	};
+	const int64 progress_values[] = {cmd, indexOid};
 
 	/* Determine the lock mode to use. */
 	lmode = RepackLockLevel(concurrent);
@@ -510,11 +528,20 @@ cluster_rel(RepackCommand cmd, Relation OldHeap, Oid indexOid,
 	if (concurrent)
 		check_concurrent_repack_requirements(OldHeap, &ident_idx);
 
+	/*
+	 * Also check the state of indexes; this can abort the command for REPACK.
+	 * Historically this hasn't affected CLUSTER or VACUUM FULL, so don't do
+	 * it for those commands.
+	 */
+	if (cmd == REPACK_COMMAND_REPACK)
+		check_index_requirements(OldHeap, cmd);
+
 	/* Check for user-requested abort. */
 	CHECK_FOR_INTERRUPTS();
 
 	pgstat_progress_start_command(PROGRESS_COMMAND_REPACK, tableOid);
-	pgstat_progress_update_param(PROGRESS_REPACK_COMMAND, cmd);
+	/* Report the ordering index even when using a sequential scan and sort. */
+	pgstat_progress_update_multi_param(2, progress_index, progress_values);
 
 	/*
 	 * Switch to the table owner's userid, so that any index functions are run
@@ -681,7 +708,7 @@ cluster_rel_recheck(RepackCommand cmd, Relation OldHeap, Oid indexOid,
 	Assert(CheckRelationLockedByMe(OldHeap, lmode, false));
 
 	/* Check that the user still has privileges for the relation */
-	if (!repack_is_permitted_for_relation(cmd, tableOid, userid))
+	if (!repack_is_permitted_for_relation(cmd, tableOid, userid, true))
 	{
 		relation_close(OldHeap, lmode);
 		return false;
@@ -857,6 +884,69 @@ mark_index_clustered(Relation rel, Oid indexOid, bool is_internal)
 }
 
 /*
+ * check_index_requirements: verify index state on relation being processed
+ *
+ * Throw an error if any incompletely-built indexes are found.
+ *
+ * Indexes that are not ready for inserts, such as ones left behind by failed
+ * CREATE INDEX CONCURRENTLY, are not maintained by DML.  Indexes that aren't
+ * marked valid could have been in the middle of validation when their build
+ * failed, and thus it's not certain that they could be built.  In both cases,
+ * attempting to rebuild may fail altogether.  Throwing an error here forces
+ * the user to take action on these indexes separately from the table
+ * reconstruction, which prevents perpetuating them for no reason.
+ */
+static void
+check_index_requirements(Relation rel, RepackCommand cmd)
+{
+	Relation	indrel;
+	SysScanDesc indscan;
+	ScanKeyData skey;
+	HeapTuple	htup;
+	int			num_invalid_idxs = 0;
+	StringInfoData dest;
+
+	initStringInfo(&dest);
+
+	/* Prepare to scan pg_index for entries having indrelid = this rel. */
+	ScanKeyInit(&skey,
+				Anum_pg_index_indrelid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(RelationGetRelid(rel)));
+
+	indrel = table_open(IndexRelationId, AccessShareLock);
+	indscan = systable_beginscan(indrel, IndexIndrelidIndexId, true,
+								 NULL, 1, &skey);
+
+	while (HeapTupleIsValid(htup = systable_getnext(indscan)))
+	{
+		Form_pg_index index = (Form_pg_index) GETSTRUCT(htup);
+
+		if (!index->indisvalid)
+		{
+			if (num_invalid_idxs == 0)
+				appendStringInfo(&dest, _("\"%s\""), get_rel_name(index->indexrelid));
+			else
+				appendStringInfo(&dest, _(", \"%s\""), get_rel_name(index->indexrelid));
+			num_invalid_idxs++;
+		}
+	}
+	systable_endscan(indscan);
+	table_close(indrel, AccessShareLock);
+
+	if (num_invalid_idxs > 0)
+		ereport(ERROR,
+				errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				errmsg("cannot execute %s on relation \"%s\"",
+					   RepackCommandAsString(cmd), RelationGetRelationName(rel)),
+				errdetail_plural("An invalid index cannot be processed correctly: %s.",
+								 "Some invalid indexes cannot be processed correctly: %s.",
+								 num_invalid_idxs,
+								 dest.data),
+				errhint("Use DROP INDEX or REINDEX."));
+}
+
+/*
  * Check if the CONCURRENTLY option is legal for the relation.
  *
  * *Ident_idx_p receives OID of the identity index.
@@ -873,8 +963,21 @@ check_concurrent_repack_requirements(Relation rel, Oid *ident_idx_p)
 				errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				errmsg("cannot execute %s in this configuration",
 					   "REPACK (CONCURRENTLY)"),
-				errdetail("%s requires \"wal_level\" to be set to \"replica\" or higher.",
-						  "REPACK (CONCURRENTLY)"));
+				errdetail("This operation requires \"wal_level\" to be set to \"replica\" or higher."));
+
+	/*
+	 * A table AM that doesn't support logical decoding would cause REPACK
+	 * (CONCURRENTLY) to silently lose the changes made during the rewrite.
+	 * Nothing in TableAmRoutine tells us whether it does, so for now restrict
+	 * to heap. Check the routine rather than the AM OID, so that an AM
+	 * reusing the heap handler still works.
+	 */
+	if (rel->rd_tableam != GetHeapamTableAmRoutine())
+		ereport(ERROR,
+				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				errmsg("cannot execute %s on relation \"%s\"",
+					   "REPACK (CONCURRENTLY)", RelationGetRelationName(rel)),
+				errdetail("This operation is only supported for the \"heap\" access method."));
 
 	/* Data changes in system relations are not logically decoded. */
 	if (IsCatalogRelation(rel))
@@ -882,8 +985,20 @@ check_concurrent_repack_requirements(Relation rel, Oid *ident_idx_p)
 				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				errmsg("cannot execute %s on relation \"%s\"",
 					   "REPACK (CONCURRENTLY)", RelationGetRelationName(rel)),
-				errhint("%s is not supported for catalog relations.",
-						"REPACK (CONCURRENTLY)"));
+				errdetail("This operation is not supported for system catalogs."));
+
+	/*
+	 * REPACK (CONCURRENTLY) is not MVCC-safe; it doesn't preserve visibility
+	 * information, which logical decoding needs because it reads user catalog
+	 * tables under a historic snapshot. Removing this check requires making
+	 * it MVCC-safe and logical rewrite mappings.
+	 */
+	if (RelationIsUsedAsCatalogTable(rel))
+		ereport(ERROR,
+				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				errmsg("cannot execute %s on relation \"%s\"",
+					   "REPACK (CONCURRENTLY)", RelationGetRelationName(rel)),
+				errdetail("This operation is not supported for user catalog tables."));
 
 	/*
 	 * reorderbuffer.c does not seem to handle processing of TOAST relation
@@ -894,8 +1009,7 @@ check_concurrent_repack_requirements(Relation rel, Oid *ident_idx_p)
 				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				errmsg("cannot execute %s on relation \"%s\"",
 					   "REPACK (CONCURRENTLY)", RelationGetRelationName(rel)),
-				errhint("%s is not supported for TOAST relations.",
-						"REPACK (CONCURRENTLY)"));
+				errdetail("This operation is not supported for TOAST tables."));
 
 	relpersistence = rel->rd_rel->relpersistence;
 	if (relpersistence != RELPERSISTENCE_PERMANENT)
@@ -903,8 +1017,15 @@ check_concurrent_repack_requirements(Relation rel, Oid *ident_idx_p)
 				errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				errmsg("cannot execute %s on relation \"%s\"",
 					   "REPACK (CONCURRENTLY)", RelationGetRelationName(rel)),
-				errhint("%s is only allowed for permanent relations.",
-						"REPACK (CONCURRENTLY)"));
+				errdetail("This operation is only supported for permanent relations."));
+
+	/* A materialized view produces no logically decoded changes. */
+	if (rel->rd_rel->relkind == RELKIND_MATVIEW)
+		ereport(ERROR,
+				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				errmsg("cannot execute %s on relation \"%s\"",
+					   "REPACK (CONCURRENTLY)", RelationGetRelationName(rel)),
+				errdetail_relkind_not_supported(rel->rd_rel->relkind));
 
 	/*
 	 * With NOTHING, WAL does not contain the old tuple; FULL is not yet
@@ -917,19 +1038,16 @@ check_concurrent_repack_requirements(Relation rel, Oid *ident_idx_p)
 				errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				errmsg("cannot execute %s on relation \"%s\"",
 					   "REPACK (CONCURRENTLY)", RelationGetRelationName(rel)),
-				errdetail("%s does not support tables with %s.",
-						  "REPACK (CONCURRENTLY)",
+				errdetail("This operation does not support tables with %s.",
 						  replident == REPLICA_IDENTITY_NOTHING ?
 						  "REPLICA IDENTITY NOTHING" : "REPLICA IDENTITY FULL"));
 
 	/*
-	 * Obtain the replica identity index -- either one that has been set
-	 * explicitly, or a non-deferrable primary key.  If none of these cases
-	 * apply, the table cannot be repacked concurrently.  It might be possible
-	 * to have repack work with a FULL replica identity; however that requires
-	 * more work and is not implemented yet.
+	 * Obtain the replica identity index to use.  If there isn't one, the
+	 * table cannot be repacked concurrently.  (Replica identity FULL is not
+	 * supported yet.)
 	 */
-	ident_idx = GetRelationIdentityOrPK(rel);
+	ident_idx = RelationGetReplicaIndex(rel);
 	if (!OidIsValid(ident_idx))
 	{
 		/* This special case warrants its own error message */
@@ -939,16 +1057,15 @@ check_concurrent_repack_requirements(Relation rel, Oid *ident_idx_p)
 					errmsg("cannot execute %s on relation \"%s\"",
 						   "REPACK (CONCURRENTLY)",
 						   RelationGetRelationName(rel)),
-					errdetail("%s does not support deferrable primary keys.",
-							  "REPACK (CONCURRENTLY)"),
+					errdetail("This operation does not support deferrable primary keys."),
 					errhint("Use ALTER TABLE ... REPLICA IDENTITY USING INDEX to designate another index as replica identity."));
 
 		ereport(ERROR,
 				errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				errmsg("cannot execute %s on relation \"%s\"",
 					   "REPACK (CONCURRENTLY)", RelationGetRelationName(rel)),
-				errhint("Relation \"%s\" has no identity index.",
-						RelationGetRelationName(rel)));
+				errdetail("Relation \"%s\" has no identity index.",
+						  RelationGetRelationName(rel)));
 	}
 
 	*ident_idx_p = ident_idx;
@@ -1382,10 +1499,12 @@ copy_table_data(Relation NewHeap, Relation OldHeap, Relation OldIndex,
 
 	/*
 	 * Decide whether to use an indexscan or seqscan-and-optional-sort to scan
-	 * the OldHeap.  We know how to use a sort to duplicate the ordering of a
-	 * btree index, and will use seqscan-and-sort for that case if the planner
-	 * tells us it's cheaper.  Otherwise, always indexscan if an index is
-	 * provided, else plain seqscan.
+	 * the OldHeap.  If the index is a btree, ask the planner to choose via
+	 * normal path cost comparison.
+	 *
+	 * The underlying tuplesort.c code doesn't support AMs other than btree,
+	 * so we must always use a normal indexscan if a non-btree index is
+	 * specified -- or an unsorted seqscan if no index is given.
 	 */
 	if (OldIndex != NULL && OldIndex->rd_rel->relam == BTREE_AM_OID)
 		use_sort = plan_cluster_use_sort(RelationGetRelid(OldHeap),
@@ -2155,7 +2274,7 @@ get_tables_to_repack(RepackCommand cmd, bool usingindex, MemoryContext permcxt)
 
 			/* noisily skip rels which the user can't process */
 			if (!repack_is_permitted_for_relation(cmd, index->indrelid,
-												  GetUserId()))
+												  GetUserId(), false))
 				continue;
 
 			/* Use a permanent memory context for the result list */
@@ -2192,7 +2311,7 @@ get_tables_to_repack(RepackCommand cmd, bool usingindex, MemoryContext permcxt)
 
 			/* noisily skip rels which the user can't process */
 			if (!repack_is_permitted_for_relation(cmd, class->oid,
-												  GetUserId()))
+												  GetUserId(), false))
 				continue;
 
 			/* Use a permanent memory context for the result list */
@@ -2321,7 +2440,7 @@ get_tables_to_repack_partitioned(RepackStmt *stmt, Relation rel,
 		 * if so.
 		 */
 		if (!repack_is_permitted_for_relation(stmt->command, table_oid,
-											  GetUserId()))
+											  GetUserId(), false))
 			continue;
 
 		/* Use a permanent memory context for the result list */
@@ -2341,26 +2460,38 @@ get_tables_to_repack_partitioned(RepackStmt *stmt, Relation rel,
 
 
 /*
- * Return whether userid has privileges to execute REPACK on relid.
+ * Return whether userid has privileges to execute REPACK/CLUSTER on relid.
  *
- * Caller may not have a lock on the relation, so it could have been
- * dropped concurrently.  In that case, silently return false.
+ * The relation may already be locked by caller, in which case it cannot
+ * possibly go missing; otherwise it may have been removed recently.  If
+ * it's been removed, silently return false.  If the relation exists but
+ * the user doesn't have the required privs, emit a WARNING and return false.
  *
- * If the relation does exist but the user doesn't have the required
- * privs, emit a WARNING and return false.  Otherwise, return true.
+ * Otherwise the relation exists and user has required perms, so return true.
  */
 static bool
-repack_is_permitted_for_relation(RepackCommand cmd, Oid relid, Oid userid)
+repack_is_permitted_for_relation(RepackCommand cmd, Oid relid, Oid userid,
+								 bool already_locked)
 {
 	bool		is_missing = false;
 	AclResult	result;
 	char	   *relname;
 
 	Assert(cmd == REPACK_COMMAND_CLUSTER || cmd == REPACK_COMMAND_REPACK);
+	Assert(!already_locked ||
+		   CheckRelationOidLockedByMe(relid, AccessShareLock, true));
 
 	result = pg_class_aclcheck_ext(relid, userid, ACL_MAINTAIN, &is_missing);
+
+	/*
+	 * If the relation was concurrently dropped, nothing to do.  This is only
+	 * reachable when the caller doesn't already have a lock on the relation.
+	 */
 	if (is_missing)
+	{
+		Assert(!already_locked);
 		return false;
+	}
 
 	if (result == ACLCHECK_OK)
 		return true;
@@ -2901,10 +3032,10 @@ find_target_tuple(Relation rel, ChangeContext *chgcxt, TupleTableSlot *locator,
 	}
 
 	/* XXX no instrumentation for now */
-	scan = index_beginscan(rel, chgcxt->cc_ident_index, GetActiveSnapshot(),
+	scan = index_beginscan(rel, chgcxt->cc_ident_index, false, GetActiveSnapshot(),
 						   NULL, chgcxt->cc_ident_key_nentries, 0, 0);
 	index_rescan(scan, chgcxt->cc_ident_key, chgcxt->cc_ident_key_nentries, NULL, 0);
-	while (index_getnext_slot(scan, ForwardScanDirection, retrieved))
+	while (table_index_getnext_slot(scan, ForwardScanDirection, retrieved))
 	{
 		/* Be wary of temporal constraints */
 		if (scan->xs_recheck && !identity_key_equal(chgcxt, locator, retrieved))
@@ -3428,6 +3559,8 @@ build_new_indexes(Relation NewHeap, Relation OldHeap, List *OldIndexes)
 		result = lappend_oid(result, newindex);
 
 		index_close(ind, NoLock);
+
+		pgstat_progress_incr_param(PROGRESS_REPACK_INDEX_REBUILD_COUNT, 1);
 	}
 
 	return result;

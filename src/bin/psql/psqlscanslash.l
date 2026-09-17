@@ -474,7 +474,7 @@ other			.
  * has been consumed through the leading backslash.
  *
  * The return value is a malloc'd copy of the command name, as parsed off
- * from the input.
+ * from the input, or NULL on out-of-memory.
  */
 char *
 psql_scan_slash_command(PsqlScanState state)
@@ -505,7 +505,7 @@ psql_scan_slash_command(PsqlScanState state)
 	/* And lex. */
 	yylex(NULL, state->scanner);
 
-	/* There are no possible errors in this lex state... */
+	/* There are no possible syntax errors in this lex state... */
 
 	/*
 	 * In case the caller returns to using the regular SQL lexer, reselect the
@@ -513,12 +513,24 @@ psql_scan_slash_command(PsqlScanState state)
 	 */
 	psql_scan_reselect_sql_lexer(state);
 
+	/*
+	 * yylex() appends command-name text to mybuf, so a buffer enlargement
+	 * failure during lexing can leave mybuf broken even if initialization
+	 * succeeded.
+	 */
+	if (PQExpBufferDataBroken(mybuf))
+	{
+		pg_log_error("out of memory");
+		return NULL;
+	}
+
 	return mybuf.data;
 }
 
 /*
  * Parse off the next argument for a backslash command, and return it as a
- * malloc'd string.  If there are no more arguments, returns NULL.
+ * malloc'd string.  If there are no more arguments or on out-of-memory,
+ * returns NULL.
  *
  * type tells what processing, if any, to perform on the option string;
  * for example, if it's a SQL identifier, we want to downcase any unquoted
@@ -594,6 +606,16 @@ psql_scan_slash_option(PsqlScanState state,
 	 * quoted string, as indicated by final_state, EOL is an error.
 	 */
 	Assert(lexresult == LEXRES_EOL || lexresult == LEXRES_OK);
+
+	/*
+	 * yylex() appends option text to mybuf, so a buffer enlargement failure
+	 * during lexing can leave mybuf broken even if initialization succeeded.
+	 */
+	if (PQExpBufferDataBroken(mybuf))
+	{
+		pg_log_error("out of memory");
+		return NULL;
+	}
 
 	switch (final_state)
 	{
@@ -716,8 +738,6 @@ psql_scan_get_lex_state(PsqlScanState state)
 	PsqlScanStateSave *lex_state = pg_malloc_object(PsqlScanStateSave);
 	StaticAssertDecl(sizeof(lex_state->init_idents) == sizeof(state->init_idents),
 					 "init_idents array lengths must match");
-	StaticAssertDecl(sizeof(lex_state->sub_idents) == sizeof(state->sub_idents),
-					 "sub_idents array lengths must match");
 
 	lex_state->paren_depth = state->paren_depth;
 	lex_state->begin_depth = state->begin_depth;
@@ -725,9 +745,6 @@ psql_scan_get_lex_state(PsqlScanState state)
 	lex_state->init_idents_count = state->init_idents_count;
 	memcpy(lex_state->init_idents, state->init_idents,
 		   sizeof(lex_state->init_idents));
-	lex_state->sub_idents_count = state->sub_idents_count;
-	memcpy(lex_state->sub_idents, state->sub_idents,
-		   sizeof(lex_state->sub_idents));
 	return lex_state;
 }
 
@@ -744,9 +761,6 @@ psql_scan_set_lex_state(PsqlScanState state,
 	state->init_idents_count = lex_state->init_idents_count;
 	memcpy(state->init_idents, lex_state->init_idents,
 		   sizeof(state->init_idents));
-	state->sub_idents_count = lex_state->sub_idents_count;
-	memcpy(state->sub_idents, lex_state->sub_idents,
-		   sizeof(state->sub_idents));
 }
 
 /*
@@ -805,13 +819,22 @@ static void
 evaluate_backtick(PsqlScanState state)
 {
 	PQExpBuffer output_buf = state->output_buf;
-	char	   *cmd = output_buf->data + backtick_start_offset;
+	char	   *cmd;
 	PQExpBufferData cmd_output;
 	FILE	   *fd;
 	bool		error = false;
 	int			exit_code = 0;
 	char		buf[512];
 	size_t		result;
+
+	/*
+	 * The option buffer is already broken; avoid touching the static
+	 * oom_buffer and let psql_scan_slash_option() return NULL.
+	 */
+	if (PQExpBufferBroken(output_buf))
+		return;
+
+	cmd = output_buf->data + backtick_start_offset;
 
 	initPQExpBuffer(&cmd_output);
 
